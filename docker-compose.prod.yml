@@ -1,0 +1,82 @@
+# Production stack for Alibaba Cloud ECS (Singapore region).
+# Usage on the ECS instance:
+#   docker compose -f docker-compose.prod.yml up -d
+# All secrets are read from a .env file placed next to this file on the host.
+
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-yieldra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-yieldra_db}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-yieldra} -d ${POSTGRES_DB:-yieldra_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-yieldra}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-yieldra_db}
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+
+  celery_worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-yieldra}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-yieldra_db}
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+
+  celery_beat:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-yieldra}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-yieldra_db}
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: production
+    depends_on:
+      - redis
+      - db
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+
+volumes:
+  pgdata:
+  redisdata:
