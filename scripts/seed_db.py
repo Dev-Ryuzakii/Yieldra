@@ -22,6 +22,7 @@ from app.models.farm import Farm, FarmPlot, FarmStatus, PlotStatus
 from app.models.harvest import ColdStorageBooking, Harvest, HarvestStatus
 from app.models.investment import Investment, InvestmentStatus
 from app.models.offtake import ContractStatus, OfftakeContract
+from app.models.payout import FarmerDisbursement, PayoutAccount
 from app.models.reference import ColdStorageFacility, CropParameter
 from app.models.sponsorship import Sponsorship, SponsorshipMilestone
 from app.models.user import Language, User, UserRole
@@ -29,8 +30,10 @@ from app.utils.money import naira_to_kobo
 
 # Order matters: children before parents (FK constraints).
 _TABLES_IN_DELETE_ORDER = [
+    FarmerDisbursement,
     SponsorshipMilestone,
     Sponsorship,
+    PayoutAccount,
     OfftakeContract,
     ColdStorageBooking,
     Harvest,

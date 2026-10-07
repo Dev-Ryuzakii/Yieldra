@@ -1,23 +1,31 @@
-"""Sponsorship Agent — pay-as-it-grows farm sponsorship over PayPal.
+"""Sponsorship Agent — pay-as-it-grows farm sponsorship.
+
+A sponsor funds a farm in four tranches. The first is paid up front; each later one
+is collected only after the farmer's photo of that stage passes verification.
+
+Two payment rails:
+  * PayPal (USD)  the sponsor approves once and their PayPal account is saved; later
+                  tranches are charged to it with no sponsor present. Each paid tranche
+                  creates a naira disbursement to the farmer (see services/disbursements).
+  * Tuago (NGN)   bank rails cannot pull from an account, so each tranche is a Tuago
+                  checkout the sponsor pays. It is routed through the farmer's Tuago
+                  subaccount, so the farmer's share settles straight to their bank.
 
 Flow:
-  1. ``start``            sponsor picks a farm and an amount -> PayPal order for the
-                          first tranche, approved once by the sponsor (saves their
-                          PayPal account for later tranches).
-  2. ``confirm_payment``  PayPal sends the sponsor back -> capture, activate.
-  3. ``submit_evidence``  farmer sends a photo -> Milestone Verification Agent judges
-                          it -> policy decides -> the next tranche is charged to the
-                          saved PayPal account, held for review, or refused.
-  4. ``review_milestone`` a person settles a verdict the policy would not auto-approve.
+  1. ``start``                    plan tranches, create the first payment
+  2. ``confirm_payment``          PayPal return/webhook -> capture, activate
+     ``confirm_tuago_payment``    Tuago return/webhook  -> verify, activate or advance
+  3. ``submit_evidence``          farmer photo -> Milestone Verification Agent -> policy
+                                  -> charge (PayPal) or payment request (Tuago)
+  4. ``review_milestone``         a person settles a verdict the policy held
 
 Rules this agent keeps:
-  * The model never moves money. It judges photos and writes messages; charging is
+  * The model never moves money. It judges photos and writes messages; collecting is
     plain code behind ``milestone_agent.decide``.
-  * Every charge carries an idempotency key, so a retry can never charge twice.
-  * A successful charge is committed before anything else (messages, model calls)
-    can fail.
-
-Not built yet: paying the farmer the naira equivalent of each tranche (Paystack leg).
+  * Every PayPal charge carries an idempotency key, so a retry can never charge twice.
+  * A payment is committed before anything else (messages, model calls) can fail.
+  * A provider's word is checked with the provider: amounts are compared before a
+    tranche is marked paid.
 """
 
 from __future__ import annotations
@@ -29,35 +37,34 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent, fetch_image
 from app.agents.milestone_agent import MilestoneAgent, decide
 from app.config import settings
 from app.models.farm import Farm
+from app.models.payout import DisbursementStatus, FarmerDisbursement
 from app.models.sponsorship import (
     MilestoneStatus,
+    Rail,
     Sponsorship,
     SponsorshipMilestone,
     SponsorshipStatus,
 )
 from app.models.user import User
-from app.services.milestones import (
-    MAX_TOTAL_MINOR,
-    MIN_TOTAL_MINOR,
-    plan_for_crop,
-    split_amount,
-)
-from app.tools import paypal
+from app.services import disbursements, evidence_store, payouts
+from app.services.milestones import limits_for, plan_for_crop, split_amount
+from app.services.notify import notify
+from app.tools import paypal, tuago
 from app.tools.paypal import PayPalError
-from app.tools.telegram import send_text_message
+from app.tools.tuago import TuagoError
 from app.utils.logger import get_logger
-from app.utils.money import format_usd
+from app.utils.money import format_money, format_naira
 
 log = get_logger("yieldra.agent.sponsorship")
 
-CURRENCY = "USD"
+CURRENCY_BY_RAIL = {Rail.paypal: "USD", Rail.tuago: "NGN"}
 
 SYSTEM_PROMPT = (
     "You are Yieldra's Sponsorship Agent. You write short updates about a farm "
@@ -71,6 +78,11 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def track_url(reference: str) -> str:
+    """The sponsor's private page for one sponsorship."""
+    return f"{settings.public_base_url.rstrip('/')}/s/{reference}"
+
+
 class SponsorshipAgent(BaseAgent):
     def __init__(self) -> None:
         super().__init__(model=settings.model_report, system_prompt=SYSTEM_PROMPT)
@@ -78,20 +90,39 @@ class SponsorshipAgent(BaseAgent):
 
     # -- 1. start ----------------------------------------------------------
     async def start(
-        self, session: AsyncSession, sponsor_id: int, farm_id: int, total_minor: int
+        self,
+        session: AsyncSession,
+        sponsor_id: int,
+        farm_id: int,
+        total_minor: int,
+        rail: str = Rail.paypal.value,
     ) -> dict[str, Any]:
-        """Create a sponsorship and the PayPal order for its first tranche."""
+        """Create a sponsorship and the payment for its first tranche."""
+        try:
+            chosen = Rail(rail)
+        except ValueError:
+            return {"status": "invalid_rail", "message": "rail must be 'paypal' or 'tuago'"}
+        currency = CURRENCY_BY_RAIL[chosen]
+
         sponsor = await session.get(User, sponsor_id)
         farm = await session.get(Farm, farm_id)
         if sponsor is None or farm is None:
             return {"status": "error", "message": "sponsor or farm not found"}
-        if not MIN_TOTAL_MINOR <= total_minor <= MAX_TOTAL_MINOR:
+        lowest, highest = limits_for(currency)
+        if not lowest <= total_minor <= highest:
             return {
                 "status": "invalid_amount",
                 "message": (
-                    f"total must be between {format_usd(MIN_TOTAL_MINOR)} and "
-                    f"{format_usd(MAX_TOTAL_MINOR)}"
+                    f"total must be between {format_money(lowest, currency)} and "
+                    f"{format_money(highest, currency)}"
                 ),
+            }
+        if chosen is Rail.tuago and await payouts.get_account(session, farm.farmer_id) is None:
+            # Naira payments are routed to the farmer's bank, so one must be on file.
+            return {
+                "status": "farmer_not_ready",
+                "message": "this farmer has not added bank details yet, so naira "
+                "sponsorship is not open for this farm",
             }
 
         plan = plan_for_crop(farm.crop_type)
@@ -102,7 +133,8 @@ class SponsorshipAgent(BaseAgent):
             farm_id=farm.id,
             sponsor_id=sponsor.id,
             total_minor=total_minor,
-            currency=CURRENCY,
+            currency=currency,
+            rail=chosen.value,
             status=SponsorshipStatus.pending_approval,
         )
         session.add(sponsorship)
@@ -125,41 +157,49 @@ class SponsorshipAgent(BaseAgent):
         await session.flush()
 
         first = milestones[0]
-        base = settings.public_base_url.rstrip("/")
-        order = await paypal.create_order(
-            amount_minor=first.amount_minor,
-            currency=CURRENCY,
-            reference=self._payment_reference(sponsorship, first),
-            description=f"Yieldra sponsorship: {farm.name} (tranche 1 of {len(milestones)})",
-            return_url=f"{base}/sponsorships/paypal/return",
-            cancel_url=f"{base}/sponsorships/paypal/cancel",
-            save_payment_method=True,
-        )
-        sponsorship.paypal_order_id = order["order_id"]
-        first.paypal_order_id = order["order_id"]
+        if chosen is Rail.paypal:
+            base = settings.public_base_url.rstrip("/")
+            order = await paypal.create_order(
+                amount_minor=first.amount_minor,
+                currency=currency,
+                reference=self._payment_reference(sponsorship, first),
+                description=f"Yieldra sponsorship: {farm.name} (tranche 1 of {len(milestones)})",
+                return_url=f"{base}/sponsorships/paypal/return",
+                cancel_url=f"{base}/sponsorships/paypal/cancel",
+                save_payment_method=True,
+            )
+            sponsorship.paypal_order_id = order["order_id"]
+            first.paypal_order_id = order["order_id"]
+            first.payment_reference = self._payment_reference(sponsorship, first)
+            approve_url = order["approve_url"]
+        else:
+            await self._request_naira_payment(session, sponsorship, first, farm, sponsor)
+            approve_url = first.payment_url
         await session.flush()
 
         log.info(
-            "sponsorship started id=%s farm=%s total=%s order=%s",
-            sponsorship.id, farm.id, total_minor, order["order_id"],
+            "sponsorship started id=%s rail=%s farm=%s total=%s",
+            sponsorship.id, chosen.value, farm.id, total_minor,
         )
         return {
             "status": "pending_approval",
-            "approve_url": order["approve_url"],
+            "approve_url": approve_url,
+            "track_url": track_url(sponsorship.reference),
             "sponsorship": self.serialise(sponsorship, milestones, farm),
         }
 
-    # -- 2. confirm --------------------------------------------------------
+    # -- 2. confirm (PayPal) ----------------------------------------------
     async def confirm_payment(self, session: AsyncSession, order_id: str) -> dict[str, Any]:
-        """Capture the approved first-tranche order and activate the sponsorship."""
-        sponsorship = await self._by_order(session, order_id)
+        """Capture the approved first-tranche PayPal order and activate the sponsorship."""
+        # Locked: the sponsor's return and PayPal's webhook can arrive together.
+        sponsorship = await self._by_order(session, order_id, lock=True)
         if sponsorship is None:
             return {"status": "error", "message": "unknown PayPal order"}
         farm = await session.get(Farm, sponsorship.farm_id)
         milestones = await self._milestones(session, sponsorship.id)
 
         if sponsorship.status in (SponsorshipStatus.active, SponsorshipStatus.completed):
-            # The sponsor reloaded the return page; nothing more to do.
+            # The sponsor reloaded the return page, or the webhook arrived as well.
             return {
                 "status": "already_confirmed",
                 "sponsorship": self.serialise(sponsorship, milestones, farm),
@@ -178,7 +218,7 @@ class SponsorshipAgent(BaseAgent):
             return {"status": "payment_failed", "issue": capture.get("status") or "NOT_COMPLETED"}
         if (
             capture.get("amount_minor") != first.amount_minor
-            or (capture.get("currency") or CURRENCY) != sponsorship.currency
+            or (capture.get("currency") or sponsorship.currency) != sponsorship.currency
         ):
             # Money moved but not the amount we asked for: stop and let a person look.
             log.error(
@@ -200,36 +240,46 @@ class SponsorshipAgent(BaseAgent):
 
         if not sponsorship.paypal_vault_id:
             log.warning(
-                "sponsorship %s: PayPal did not return a saved payment method, so later "
-                "tranches cannot be charged. Enable 'Save payment methods' (Vault) on the "
-                "PayPal app.",
+                "sponsorship %s: PayPal did not return a saved payment method yet. It can "
+                "arrive by webhook; otherwise enable 'Save payment methods' (Vault) on the "
+                "PayPal app, or later tranches cannot be charged.",
                 sponsorship.id,
             )
 
+        payout = await self._record_farmer_payout(session, sponsorship, first, farm)
         farmer = await session.get(User, farm.farmer_id) if farm else None
         sponsor = await session.get(User, sponsorship.sponsor_id)
-        if farmer is not None and nxt is not None:
-            await self._notify(
-                farmer,
-                f"Yieldra: A sponsor has funded {farm.name}. {format_usd(first.amount_minor)} "
-                f"is released for inputs and land preparation. Next stage: {nxt.title}. When "
-                f"it is done, send a photo with the caption PROOF to unlock "
-                f"{format_usd(nxt.amount_minor)}.",
-            )
-        if sponsor is not None:
-            await self._notify(
-                sponsor,
-                f"Yieldra: Thank you. {format_usd(first.amount_minor)} of your "
-                f"{format_usd(sponsorship.total_minor)} sponsorship of {farm.name} is paid. "
-                f"The rest is charged in stages, each only after the farmer's photo passes "
-                f"verification.",
-            )
-        log.info("sponsorship activated id=%s vault=%s", sponsorship.id, bool(sponsorship.paypal_vault_id))
+        await self._tell_farmer_funded(farmer, farm, sponsorship, first, nxt, payout)
+        await notify(
+            sponsor,
+            f"Yieldra: Thank you. {format_money(first.amount_minor, sponsorship.currency)} of "
+            f"your {format_money(sponsorship.total_minor, sponsorship.currency)} sponsorship of "
+            f"{farm.name} is paid. The rest is charged in stages, each only after the "
+            f"farmer's photo passes verification. Follow it here: "
+            f"{track_url(sponsorship.reference)}",
+        )
+        log.info(
+            "sponsorship activated id=%s vault=%s", sponsorship.id, bool(sponsorship.paypal_vault_id)
+        )
         return {
             "status": "active",
             "saved_payment_method": bool(sponsorship.paypal_vault_id),
             "sponsorship": self.serialise(sponsorship, milestones, farm),
         }
+
+    async def attach_saved_method(
+        self, session: AsyncSession, order_id: str, vault_id: str
+    ) -> dict[str, Any]:
+        """PayPal told us (by webhook) the payment token for an order we already captured."""
+        sponsorship = await self._by_order(session, order_id)
+        if sponsorship is None:
+            return {"status": "ignored", "reason": "unknown order"}
+        if sponsorship.paypal_vault_id or sponsorship.status != SponsorshipStatus.active:
+            return {"status": "ignored", "reason": "not needed"}
+        sponsorship.paypal_vault_id = vault_id
+        await session.commit()
+        log.info("saved payment method attached to sponsorship %s", sponsorship.id)
+        return {"status": "attached", "sponsorship_id": sponsorship.id}
 
     async def abandon(self, session: AsyncSession, order_id: str) -> dict[str, Any]:
         """The sponsor backed out on PayPal's page before approving."""
@@ -239,13 +289,134 @@ class SponsorshipAgent(BaseAgent):
         if sponsorship.status == SponsorshipStatus.pending_approval:
             sponsorship.status = SponsorshipStatus.cancelled
             await session.flush()
-        return {"status": sponsorship.status.value, "sponsorship_id": sponsorship.id}
+        return {
+            "status": sponsorship.status.value,
+            "sponsorship_id": sponsorship.id,
+            "reference": sponsorship.reference,
+        }
+
+    # -- 2. confirm (Tuago) -----------------------------------------------
+    async def find_tuago_milestone(
+        self, session: AsyncSession, reference: str | None = None, session_id: str | None = None
+    ) -> SponsorshipMilestone | None:
+        """The tranche a Tuago payment belongs to, by checkout id or reference."""
+        conditions = []
+        if session_id:
+            conditions.append(SponsorshipMilestone.tuago_session_id == session_id)
+        if reference:
+            conditions.append(SponsorshipMilestone.payment_reference == reference)
+        if not conditions:
+            return None
+        # Locked and re-read, so two notices for one payment are handled one at a time.
+        result = await session.execute(
+            select(SponsorshipMilestone)
+            .where(or_(*conditions), SponsorshipMilestone.tuago_session_id.is_not(None))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return result.scalars().first()
+
+    async def confirm_tuago_payment(
+        self, session: AsyncSession, milestone: SponsorshipMilestone
+    ) -> dict[str, Any]:
+        """Check a naira tranche with Tuago and, if it has been paid, advance the sponsorship."""
+        result: dict[str, Any] = {"milestone_id": milestone.id}
+        if milestone.status == MilestoneStatus.paid:
+            return {**result, "status": "already_paid"}
+        if milestone.status != MilestoneStatus.awaiting_payment or not milestone.tuago_session_id:
+            return {**result, "status": "ignored"}
+
+        try:
+            checkout = await tuago.get_checkout(milestone.tuago_session_id)
+        except TuagoError as exc:
+            return {**result, "status": "error", "code": exc.code}
+        if not tuago.is_paid(checkout.get("status")):
+            return {
+                **result,
+                "status": "failed" if tuago.is_failed(checkout.get("status")) else "pending",
+            }
+        if checkout.get("amount_minor") != milestone.amount_minor:
+            log.error(
+                "tuago amount mismatch milestone=%s expected=%s got=%s",
+                milestone.id, milestone.amount_minor, checkout.get("amount_minor"),
+            )
+            return {**result, "status": "error", "code": "amount_mismatch"}
+
+        sponsorship = await session.get(Sponsorship, milestone.sponsorship_id)
+        farm = await session.get(Farm, sponsorship.farm_id)
+        milestones = await self._milestones(session, sponsorship.id)
+        first_payment = sponsorship.status == SponsorshipStatus.pending_approval
+
+        milestone.status = MilestoneStatus.paid
+        milestone.paid_at = _now()
+        milestone.payment_url = None
+        milestone.failure_reason = None
+        nxt = next((m for m in milestones if m.sequence == milestone.sequence + 1), None)
+        if sponsorship.status != SponsorshipStatus.cancelled:
+            # Money that lands after a cancel is still recorded, but opens nothing new.
+            if first_payment:
+                sponsorship.status = SponsorshipStatus.active
+            if nxt is not None:
+                if nxt.status == MilestoneStatus.locked:
+                    nxt.status = MilestoneStatus.awaiting_evidence
+            else:
+                sponsorship.status = SponsorshipStatus.completed
+        await session.commit()
+
+        farmer = await session.get(User, farm.farmer_id) if farm else None
+        sponsor = await session.get(User, sponsorship.sponsor_id)
+        account = await payouts.get_account(session, farm.farmer_id) if farm else None
+        where = f"{account.bank_name or 'bank'} account {account.masked}" if account else "bank"
+        amount = format_naira(milestone.amount_minor)
+        next_line = (
+            f"Next stage: {nxt.title}. When it is done, send a photo with the caption PROOF."
+            if nxt is not None
+            else "This sponsorship is complete. Well done."
+        )
+        opening = (
+            f"A sponsor has funded {farm.name}." if first_payment
+            else f"Your sponsor has paid for '{milestone.title}'."
+        )
+        await notify(
+            farmer,
+            f"Yieldra: {opening} {amount} settles to your {where} through Tuago, less the "
+            f"transfer fee. {next_line}",
+        )
+        await notify(
+            sponsor,
+            f"Yieldra: Thank you. Your payment of {amount} for {farm.name} "
+            f"('{milestone.title}') is confirmed. Follow it here: "
+            f"{track_url(sponsorship.reference)}",
+        )
+        log.info("naira tranche paid sponsorship=%s milestone=%s", sponsorship.id, milestone.id)
+        return {**result, "status": "paid", "sponsorship_id": sponsorship.id}
+
+    async def refresh(self, session: AsyncSession, sponsorship: Sponsorship) -> dict[str, Any]:
+        """Re-check open naira payments with Tuago; replace a checkout that failed or expired."""
+        farm = await session.get(Farm, sponsorship.farm_id)
+        sponsor = await session.get(User, sponsorship.sponsor_id)
+        for candidate in await self._milestones(session, sponsorship.id):
+            if candidate.status != MilestoneStatus.awaiting_payment:
+                continue
+            milestone = await self.find_tuago_milestone(
+                session, session_id=candidate.tuago_session_id
+            )
+            if milestone is None:
+                continue
+            outcome = await self.confirm_tuago_payment(session, milestone)
+            if outcome["status"] == "failed" and sponsorship.status != SponsorshipStatus.cancelled:
+                try:
+                    await self._request_naira_payment(session, sponsorship, milestone, farm, sponsor)
+                    await session.commit()
+                except TuagoError as exc:
+                    log.warning("could not replace checkout for milestone %s: %s", milestone.id, exc.code)
+        return await self.get(session, sponsorship.id)
 
     # -- 3. evidence -------------------------------------------------------
     async def submit_evidence(
         self, session: AsyncSession, farm_id: int, photo_url: str
     ) -> dict[str, Any]:
-        """Verify a farmer's photo and release the tranche(s) it unlocks."""
+        """Verify a farmer's photo and collect the tranche(s) it unlocks."""
         farm = await session.get(Farm, farm_id)
         if farm is None:
             return {"status": "error", "message": "farm not found"}
@@ -253,9 +424,7 @@ class SponsorshipAgent(BaseAgent):
 
         pending = await self._pending_milestones(session, farm_id)
         if not pending:
-            await self._notify(
-                farmer, "Yieldra: No sponsorship stage is waiting for a photo right now."
-            )
+            await notify(farmer, "Yieldra: No sponsorship stage is waiting for a photo right now.")
             return {"status": "nothing_pending", "farm_id": farm_id}
 
         # One photo proves one stage: the earliest open one. Several sponsors of the
@@ -266,9 +435,7 @@ class SponsorshipAgent(BaseAgent):
 
         fetched = await fetch_image(photo_url)
         if fetched is None:
-            await self._notify(
-                farmer, "Yieldra: We could not open that photo. Please send it again."
-            )
+            await notify(farmer, "Yieldra: We could not open that photo. Please send it again.")
             return {"status": "photo_unreadable", "farm_id": farm_id}
         data, media_type = fetched
         digest = hashlib.sha256(data).hexdigest()
@@ -279,7 +446,7 @@ class SponsorshipAgent(BaseAgent):
             .limit(1)
         )
         if reused.first() is not None:
-            await self._notify(
+            await notify(
                 farmer,
                 "Yieldra: That photo has been used before. Please send a new photo of the "
                 "farm taken today, with the caption PROOF.",
@@ -297,7 +464,7 @@ class SponsorshipAgent(BaseAgent):
             )
         except Exception:  # noqa: BLE001 — a model outage must never release or lose a tranche
             log.exception("milestone verification failed farm=%s stage=%s", farm_id, stage_key)
-            await self._notify(
+            await notify(
                 farmer,
                 "Yieldra: We could not check your photo just now. Please send it again later.",
             )
@@ -305,11 +472,19 @@ class SponsorshipAgent(BaseAgent):
 
         decision = decide(verdict)
         now = _now()
+        try:
+            stored = evidence_store.save(data, media_type, digest)
+        except OSError:
+            # Keeping a copy is a convenience; verification does not depend on it.
+            log.exception("could not store evidence photo %s", digest)
+            stored = None
+
         releases: list[dict[str, Any]] = []
         for milestone, _ in group:
             # Remember every photo we judged, pass or fail, so it cannot be resubmitted
             # until the model happens to say yes.
             milestone.evidence_sha256 = digest
+            milestone.evidence_photo = stored
             milestone.verdict_summary = verdict.summary
             milestone.verdict_confidence = verdict.confidence
             if decision != "reject":
@@ -321,45 +496,49 @@ class SponsorshipAgent(BaseAgent):
         if decision == "release":
             for milestone, sponsorship in group:
                 releases.append(
-                    await self._release(
-                        session, sponsorship, milestone, farm, verdict.observations
-                    )
+                    await self._release(session, sponsorship, milestone, farm, verdict.observations)
                 )
             await session.commit()
 
         if decision == "reject":
-            await self._notify(
+            await notify(
                 farmer,
                 f"Yieldra: This photo does not yet show '{stage.title}'. We need to see: "
                 f"{stage.evidence_required} Please send a clear, wide photo with the caption "
                 f"PROOF.",
             )
         elif decision == "review":
-            await self._notify(
+            await notify(
                 farmer,
                 f"Yieldra: Thank you. Your photo for '{stage.title}' is being checked by our "
                 f"team. We will message you soon.",
             )
         else:
-            await self._notify_farmer_released(session, farmer, farm, stage, releases)
+            await self._tell_farmer_released(session, farmer, farm, stage, releases)
 
         log.info(
             "evidence farm=%s stage=%s decision=%s confidence=%.2f releases=%d",
             farm_id, stage_key, decision, verdict.confidence, len(releases),
         )
-        if decision == "release":
-            # Verified is not the same as paid: say so if every charge failed.
-            any_paid = any(r["status"] == "paid" for r in releases)
-            status = "released" if any_paid else "payment_failed"
-        else:
-            status = {"review": "needs_review", "reject": "rejected"}[decision]
         return {
-            "status": status,
+            "status": self._evidence_status(decision, releases),
             "farm_id": farm_id,
             "milestone": stage_key,
             "verdict": verdict.model_dump(),
             "releases": releases,
         }
+
+    @staticmethod
+    def _evidence_status(decision: str, releases: list[dict[str, Any]]) -> str:
+        if decision != "release":
+            return {"review": "needs_review", "reject": "rejected"}[decision]
+        outcomes = {r["status"] for r in releases}
+        # Verified is not the same as paid: say which it is.
+        if "paid" in outcomes:
+            return "released"
+        if "awaiting_payment" in outcomes:
+            return "payment_requested"
+        return "payment_failed"
 
     # -- 4. human review / retries ----------------------------------------
     async def review_milestone(
@@ -381,7 +560,7 @@ class SponsorshipAgent(BaseAgent):
             milestone.status = MilestoneStatus.awaiting_evidence
             milestone.verified_at = None
             await session.commit()
-            await self._notify(
+            await notify(
                 farmer,
                 f"Yieldra: Your photo for '{milestone.title}' was not accepted. Please send "
                 f"a new, clear photo with the caption PROOF.",
@@ -392,11 +571,15 @@ class SponsorshipAgent(BaseAgent):
             session, sponsorship, milestone, farm, milestone.verdict_summary or ""
         )
         await session.commit()
-        await self._notify_farmer_released(session, farmer, farm, milestone, [release])
-        return {"status": "released", "milestone_id": milestone.id, "releases": [release]}
+        await self._tell_farmer_released(session, farmer, farm, milestone, [release])
+        return {
+            "status": self._evidence_status("release", [release]),
+            "milestone_id": milestone.id,
+            "releases": [release],
+        }
 
     async def retry_payment(self, session: AsyncSession, milestone_id: int) -> dict[str, Any]:
-        """Try the PayPal charge again for a verified milestone whose charge failed."""
+        """Try again to collect a verified tranche whose charge or payment request failed."""
         milestone = await session.get(SponsorshipMilestone, milestone_id)
         if milestone is None:
             return {"status": "error", "message": "milestone not found"}
@@ -413,13 +596,14 @@ class SponsorshipAgent(BaseAgent):
         return {"status": release["status"], "milestone_id": milestone.id, "releases": [release]}
 
     async def cancel(self, session: AsyncSession, sponsorship_id: int) -> dict[str, Any]:
-        """Stop a sponsorship. Paid tranches stay paid; nothing further can be charged."""
+        """Stop a sponsorship. Paid tranches stay paid; nothing further can be collected."""
         sponsorship = await session.get(Sponsorship, sponsorship_id)
         if sponsorship is None:
             return {"status": "error", "message": "sponsorship not found"}
         if sponsorship.status in (SponsorshipStatus.completed, SponsorshipStatus.cancelled):
             return {"status": sponsorship.status.value, "sponsorship_id": sponsorship.id}
 
+        was_active = sponsorship.status == SponsorshipStatus.active
         await self._forget_saved_method(sponsorship)
         sponsorship.status = SponsorshipStatus.cancelled
         await session.commit()
@@ -428,14 +612,14 @@ class SponsorshipAgent(BaseAgent):
         sponsor = await session.get(User, sponsorship.sponsor_id)
         farmer = await session.get(User, farm.farmer_id) if farm else None
         farm_name = farm.name if farm else "the farm"
-        await self._notify(
-            sponsor,
-            f"Yieldra: Your sponsorship of {farm_name} is cancelled. Your saved PayPal "
-            f"account has been removed and you will not be charged again.",
+        ending = (
+            "Your saved PayPal account has been removed and you will not be charged again."
+            if sponsorship.rail == Rail.paypal.value
+            else "No further payments will be requested."
         )
-        await self._notify(
-            farmer, f"Yieldra: A sponsor has ended their sponsorship of {farm_name}."
-        )
+        await notify(sponsor, f"Yieldra: Your sponsorship of {farm_name} is cancelled. {ending}")
+        if was_active:
+            await notify(farmer, f"Yieldra: A sponsor has ended their sponsorship of {farm_name}.")
         return {"status": "cancelled", "sponsorship_id": sponsorship.id}
 
     # -- read side ---------------------------------------------------------
@@ -443,8 +627,13 @@ class SponsorshipAgent(BaseAgent):
         sponsorship = await session.get(Sponsorship, sponsorship_id)
         if sponsorship is None:
             return None
-        farm = await session.get(Farm, sponsorship.farm_id)
-        return self.serialise(sponsorship, await self._milestones(session, sponsorship.id), farm)
+        return await self._describe(session, sponsorship)
+
+    async def by_reference(self, session: AsyncSession, reference: str) -> Sponsorship | None:
+        result = await session.execute(
+            select(Sponsorship).where(Sponsorship.reference == reference)
+        )
+        return result.scalars().first()
 
     async def list_all(
         self,
@@ -457,12 +646,19 @@ class SponsorshipAgent(BaseAgent):
             stmt = stmt.where(Sponsorship.sponsor_id == sponsor_id)
         if farm_id is not None:
             stmt = stmt.where(Sponsorship.farm_id == farm_id)
-        out: list[dict[str, Any]] = []
-        for sponsorship in (await session.execute(stmt)).scalars():
-            farm = await session.get(Farm, sponsorship.farm_id)
-            milestones = await self._milestones(session, sponsorship.id)
-            out.append(self.serialise(sponsorship, milestones, farm))
-        return out
+        sponsorships = list((await session.execute(stmt)).scalars())
+        return [await self._describe(session, s) for s in sponsorships]
+
+    async def _describe(self, session: AsyncSession, sponsorship: Sponsorship) -> dict[str, Any]:
+        farm = await session.get(Farm, sponsorship.farm_id)
+        milestones = await self._milestones(session, sponsorship.id)
+        rows = await session.execute(
+            select(FarmerDisbursement).where(
+                FarmerDisbursement.milestone_id.in_([m.id for m in milestones])
+            )
+        )
+        payouts_by_milestone = {d.milestone_id: d for d in rows.scalars()}
+        return self.serialise(sponsorship, milestones, farm, payouts_by_milestone)
 
     async def status_text(self, session: AsyncSession, sponsor_id: int) -> str:
         """Plain-text summary of a sponsor's sponsorships, for chat replies."""
@@ -475,12 +671,15 @@ class SponsorshipAgent(BaseAgent):
         lines = []
         for item in items:
             line = (
-                f"{item['farm_name']}: {format_usd(item['paid_minor'])} of "
-                f"{format_usd(item['total_minor'])} released "
+                f"{item['farm_name']}: {format_money(item['paid_minor'], item['currency'])} of "
+                f"{item['total']} released "
                 f"({item['milestones_paid']}/{len(item['milestones'])} stages)."
             )
-            if item["next_milestone"]:
-                line += f" Next: {item['next_milestone']['title']}."
+            nxt = item["next_milestone"]
+            if nxt:
+                line += f" Next: {nxt['title']}."
+                if nxt.get("payment_url"):
+                    line += f" Pay {nxt['amount']} here: {nxt['payment_url']}"
             lines.append(line)
         return "Yieldra sponsorships\n" + "\n".join(lines)
 
@@ -489,12 +688,16 @@ class SponsorshipAgent(BaseAgent):
         sponsorship: Sponsorship,
         milestones: list[SponsorshipMilestone],
         farm: Farm | None,
+        payouts_by_milestone: dict[int, FarmerDisbursement] | None = None,
     ) -> dict[str, Any]:
         """API shape. Deliberately omits the saved-payment token."""
+        currency = sponsorship.currency
+        payouts_by_milestone = payouts_by_milestone or {}
         paid = [m for m in milestones if m.status == MilestoneStatus.paid]
         open_ = [m for m in milestones if m.status != MilestoneStatus.paid]
 
         def one(m: SponsorshipMilestone) -> dict[str, Any]:
+            payout = payouts_by_milestone.get(m.id)
             return {
                 "id": m.id,
                 "sequence": m.sequence,
@@ -502,31 +705,41 @@ class SponsorshipAgent(BaseAgent):
                 "title": m.title,
                 "evidence_required": m.evidence_required,
                 "amount_minor": m.amount_minor,
-                "amount": format_usd(m.amount_minor),
+                "amount": format_money(m.amount_minor, currency),
                 "status": m.status.value,
                 "verdict_summary": m.verdict_summary,
                 "verdict_confidence": (
                     float(m.verdict_confidence) if m.verdict_confidence is not None else None
                 ),
+                "evidence_photo_url": evidence_store.url_for(m.evidence_photo),
+                "sponsor_update": m.sponsor_update,
                 "verified_at": m.verified_at,
                 "paid_at": m.paid_at,
+                "payment_url": (
+                    m.payment_url if m.status == MilestoneStatus.awaiting_payment else None
+                ),
                 "paypal_order_id": m.paypal_order_id,
                 "paypal_capture_id": m.paypal_capture_id,
                 "failure_reason": m.failure_reason,
+                "farmer_payout": disbursements.describe(payout) if payout else None,
             }
 
         return {
             "id": sponsorship.id,
             "reference": sponsorship.reference,
+            "track_url": track_url(sponsorship.reference),
             "status": sponsorship.status.value,
+            "rail": sponsorship.rail,
             "farm_id": sponsorship.farm_id,
             "farm_name": farm.name if farm else None,
             "crop_type": farm.crop_type if farm else None,
+            "location": farm.location if farm else None,
             "sponsor_id": sponsorship.sponsor_id,
-            "currency": sponsorship.currency,
+            "currency": currency,
             "total_minor": sponsorship.total_minor,
-            "total": format_usd(sponsorship.total_minor),
+            "total": format_money(sponsorship.total_minor, currency),
             "paid_minor": sum(m.amount_minor for m in paid),
+            "paid": format_money(sum(m.amount_minor for m in paid), currency),
             "milestones_paid": len(paid),
             "next_milestone": one(open_[0]) if open_ else None,
             "has_saved_payment_method": bool(sponsorship.paypal_vault_id),
@@ -534,17 +747,89 @@ class SponsorshipAgent(BaseAgent):
             "milestones": [one(m) for m in milestones],
         }
 
-    # -- internals ---------------------------------------------------------
+    # -- internals: collecting --------------------------------------------
     @staticmethod
     def _payment_reference(sponsorship: Sponsorship, milestone: SponsorshipMilestone) -> str:
-        """Idempotency root for one charge attempt on one tranche.
+        """Idempotency root for one PayPal charge attempt on one tranche.
 
         The attempt number only advances after PayPal definitively refuses a charge,
         so a retry after a timeout reuses the key and cannot double-charge.
         """
         return f"{sponsorship.reference}-m{milestone.sequence}-a{milestone.payment_attempts}"
 
+    async def _request_naira_payment(
+        self,
+        session: AsyncSession,
+        sponsorship: Sponsorship,
+        milestone: SponsorshipMilestone,
+        farm: Farm,
+        sponsor: User | None,
+    ) -> None:
+        """Open a Tuago checkout for one tranche, routed to the farmer's bank."""
+        account = await payouts.get_account(session, farm.farmer_id)
+        if account is None:
+            raise TuagoError("the farmer has no payout account", code="no_payout_account")
+        checkout = await tuago.create_checkout(
+            amount_minor=milestone.amount_minor,
+            customer_email=(sponsor.email if sponsor and sponsor.email else settings.operator_email),
+            customer_name=sponsor.name if sponsor else None,
+            description=f"Yieldra sponsorship: {farm.name} ({milestone.title})",
+            redirect_url=track_url(sponsorship.reference),
+            subaccount=account.tuago_subaccount_id,
+        )
+        milestone.tuago_session_id = checkout["session_id"]
+        milestone.payment_reference = checkout.get("reference")
+        milestone.payment_url = checkout.get("checkout_url") or checkout.get("whatsapp_url")
+        milestone.status = MilestoneStatus.awaiting_payment
+        milestone.failure_reason = None
+        await session.flush()
+
     async def _release(
+        self,
+        session: AsyncSession,
+        sponsorship: Sponsorship,
+        milestone: SponsorshipMilestone,
+        farm: Farm | None,
+        observations: str,
+    ) -> dict[str, Any]:
+        """Collect one verified tranche on the sponsorship's rail."""
+        if sponsorship.rail == Rail.tuago.value:
+            return await self._release_naira(session, sponsorship, milestone, farm, observations)
+        return await self._release_paypal(session, sponsorship, milestone, farm, observations)
+
+    async def _release_naira(
+        self,
+        session: AsyncSession,
+        sponsorship: Sponsorship,
+        milestone: SponsorshipMilestone,
+        farm: Farm,
+        observations: str,
+    ) -> dict[str, Any]:
+        """Ask the naira sponsor to pay a verified tranche through Tuago."""
+        sponsor = await session.get(User, sponsorship.sponsor_id)
+        result: dict[str, Any] = {
+            "sponsorship_id": sponsorship.id,
+            "milestone_id": milestone.id,
+            "amount_minor": milestone.amount_minor,
+            "rail": Rail.tuago.value,
+        }
+        try:
+            await self._request_naira_payment(session, sponsorship, milestone, farm, sponsor)
+        except (TuagoError, httpx.HTTPError) as exc:
+            milestone.status = MilestoneStatus.payment_failed
+            milestone.failure_reason = str(getattr(exc, "code", type(exc).__name__))[:160]
+            await session.commit()
+            return {**result, "status": "payment_failed", "issue": milestone.failure_reason}
+
+        update = await self._sponsor_update(sponsor, sponsorship, farm.name, milestone, observations, None)
+        milestone.sponsor_update = update
+        await session.commit()
+        # The link is added by code, never written by the model.
+        await notify(sponsor, f"{update}\nPay here: {milestone.payment_url}", translate=False)
+        log.info("naira payment requested sponsorship=%s milestone=%s", sponsorship.id, milestone.id)
+        return {**result, "status": "awaiting_payment", "payment_url": milestone.payment_url}
+
+    async def _release_paypal(
         self,
         session: AsyncSession,
         sponsorship: Sponsorship,
@@ -555,10 +840,12 @@ class SponsorshipAgent(BaseAgent):
         """Charge one verified tranche to the sponsor's saved PayPal account."""
         farm_name = farm.name if farm else "farm"
         sponsor = await session.get(User, sponsorship.sponsor_id)
+        currency = sponsorship.currency
         result: dict[str, Any] = {
             "sponsorship_id": sponsorship.id,
             "milestone_id": milestone.id,
             "amount_minor": milestone.amount_minor,
+            "rail": Rail.paypal.value,
         }
 
         if not sponsorship.paypal_vault_id:
@@ -566,12 +853,13 @@ class SponsorshipAgent(BaseAgent):
             milestone.failure_reason = "NO_SAVED_PAYMENT_METHOD"
             return {**result, "status": "payment_failed", "issue": milestone.failure_reason}
 
+        reference = self._payment_reference(sponsorship, milestone)
         try:
             charge = await paypal.charge_saved_method(
                 vault_id=sponsorship.paypal_vault_id,
                 amount_minor=milestone.amount_minor,
-                currency=sponsorship.currency,
-                reference=self._payment_reference(sponsorship, milestone),
+                currency=currency,
+                reference=reference,
                 description=f"Yieldra sponsorship: {farm_name} ({milestone.title})",
             )
         except PayPalError as exc:
@@ -580,11 +868,11 @@ class SponsorshipAgent(BaseAgent):
             milestone.failure_reason = (exc.issue or str(exc))[:160]
             milestone.payment_attempts += 1
             await session.commit()
-            await self._notify(
+            await notify(
                 sponsor,
                 f"Yieldra: {farm_name} reached '{milestone.title}', but we could not charge "
-                f"your PayPal for {format_usd(milestone.amount_minor)}. No money has moved. "
-                f"Please check your PayPal account.",
+                f"your PayPal for {format_money(milestone.amount_minor, currency)}. No money "
+                f"has moved. Please check your PayPal account.",
             )
             return {**result, "status": "payment_failed", "issue": milestone.failure_reason}
         except httpx.HTTPError as exc:
@@ -596,6 +884,7 @@ class SponsorshipAgent(BaseAgent):
             return {**result, "status": "payment_failed", "issue": milestone.failure_reason}
 
         milestone.status = MilestoneStatus.paid
+        milestone.payment_reference = reference
         milestone.paypal_order_id = charge.get("order_id")
         milestone.paypal_capture_id = charge.get("capture_id")
         milestone.paid_at = _now()
@@ -616,11 +905,11 @@ class SponsorshipAgent(BaseAgent):
             await self._forget_saved_method(sponsorship)
             await session.commit()
 
-        await self._notify(
-            sponsor,
-            await self._sponsor_update(sponsor, farm_name, milestone, observations, nxt),
-            localise=False,
-        )
+        payout = await self._record_farmer_payout(session, sponsorship, milestone, farm)
+        update = await self._sponsor_update(sponsor, sponsorship, farm_name, milestone, observations, nxt)
+        milestone.sponsor_update = update
+        await session.commit()
+        await notify(sponsor, update, translate=False)
         log.info(
             "tranche released sponsorship=%s milestone=%s amount=%s order=%s",
             sponsorship.id, milestone.id, milestone.amount_minor, milestone.paypal_order_id,
@@ -630,7 +919,28 @@ class SponsorshipAgent(BaseAgent):
             "status": "paid",
             "paypal_order_id": milestone.paypal_order_id,
             "paypal_capture_id": milestone.paypal_capture_id,
+            "farmer_kobo": payout.amount_kobo if payout else 0,
+            "farmer_payout_status": payout.status if payout else None,
         }
+
+    async def _record_farmer_payout(
+        self,
+        session: AsyncSession,
+        sponsorship: Sponsorship,
+        milestone: SponsorshipMilestone,
+        farm: Farm | None,
+    ) -> FarmerDisbursement | None:
+        """Record the naira the farmer is owed for a paid PayPal tranche. Never raises."""
+        if farm is None:
+            return None
+        try:
+            payout = await disbursements.create_for_milestone(session, sponsorship, milestone, farm)
+            await session.commit()
+            return payout
+        except Exception:  # noqa: BLE001 — the sponsor is already charged; do not lose that
+            log.exception("could not record farmer payout for milestone %s", milestone.id)
+            await session.rollback()
+            return None
 
     async def _forget_saved_method(self, sponsorship: Sponsorship) -> None:
         """Delete the sponsor's saved PayPal account at PayPal, best effort."""
@@ -644,25 +954,39 @@ class SponsorshipAgent(BaseAgent):
             log.warning("could not delete saved method for sponsorship %s: %s", sponsorship.id, exc)
         sponsorship.paypal_vault_id = None
 
+    # -- internals: messages ----------------------------------------------
     async def _sponsor_update(
         self,
         sponsor: User | None,
+        sponsorship: Sponsorship,
         farm_name: str,
         milestone: SponsorshipMilestone,
         observations: str,
         nxt: SponsorshipMilestone | None,
     ) -> str:
         """Model-written progress update for the sponsor, with a plain fallback."""
-        amount = format_usd(milestone.amount_minor)
-        next_line = (
-            f"Next stage: {nxt.title} ({format_usd(nxt.amount_minor)})."
-            if nxt is not None
-            else "This sponsorship is now complete. Thank you."
+        currency = sponsorship.currency
+        amount = format_money(milestone.amount_minor, currency)
+        if sponsorship.rail == Rail.tuago.value:
+            money_line = f"{amount} is now due to release this stage to the farmer."
+            money_key, money_fact = "amount_now_due_from_sponsor", amount
+            next_line = ""
+        else:
+            money_line = f"{amount} was charged to your PayPal."
+            money_key, money_fact = "amount_charged_to_paypal", amount
+            next_line = (
+                f"Next stage: {nxt.title} ({format_money(nxt.amount_minor, currency)})."
+                if nxt is not None
+                else "This sponsorship is now complete. Thank you."
+            )
+        fallback = " ".join(
+            part for part in (
+                f"Yieldra: {farm_name} reached '{milestone.title}'.",
+                observations.strip(),
+                money_line,
+                next_line,
+            ) if part
         )
-        fallback = (
-            f"Yieldra: {farm_name} reached '{milestone.title}'. {observations} "
-            f"{amount} was charged to your PayPal. {next_line}"
-        ).replace("  ", " ")
         if not settings.llm_live:
             return fallback
         language = sponsor.language_preference.value if sponsor else "english"
@@ -674,7 +998,8 @@ class SponsorshipAgent(BaseAgent):
                         "content": (
                             "Write the sponsor's progress update for this milestone as a "
                             f"short chat message in {language}. Say what the photo showed, "
-                            "the amount charged, and what comes next."
+                            "the amount and whether it was charged or is now due, and what "
+                            "comes next if given. Do not include any link."
                         ),
                     }
                 ],
@@ -682,8 +1007,8 @@ class SponsorshipAgent(BaseAgent):
                     "farm": farm_name,
                     "milestone_reached": milestone.title,
                     "what_the_verified_photo_showed": observations,
-                    "amount_charged_to_paypal": amount,
-                    "next": next_line,
+                    money_key: money_fact,
+                    "next": next_line or None,
                 },
             )
         except Exception:  # noqa: BLE001 — a model outage must not drop the update
@@ -691,7 +1016,42 @@ class SponsorshipAgent(BaseAgent):
             return fallback
         return text.strip() or fallback
 
-    async def _notify_farmer_released(
+    async def _tell_farmer_funded(
+        self,
+        farmer: User | None,
+        farm: Farm | None,
+        sponsorship: Sponsorship,
+        first: SponsorshipMilestone,
+        nxt: SponsorshipMilestone | None,
+        payout: FarmerDisbursement | None,
+    ) -> None:
+        """First tranche of a PayPal sponsorship is in: tell the farmer in naira."""
+        if farmer is None or farm is None:
+            return
+        next_line = (
+            f"Next stage: {nxt.title}. When it is done, send a photo with the caption PROOF."
+            if nxt is not None
+            else ""
+        )
+        await notify(
+            farmer,
+            f"Yieldra: A sponsor has funded {farm.name}. {self._payout_line(payout)} "
+            f"It is for inputs and land preparation. {next_line}".strip(),
+        )
+
+    @staticmethod
+    def _payout_line(payout: FarmerDisbursement | None) -> str:
+        if payout is None:
+            return "Your payment is being arranged."
+        amount = format_naira(payout.amount_kobo)
+        if payout.status == DisbursementStatus.needs_bank_details.value:
+            return (
+                f"{amount} is waiting for you. To receive it, reply: BANK <bank code> "
+                f"<account number> (send BANKS to see the codes)."
+            )
+        return f"{amount} is being sent to your bank account."
+
+    async def _tell_farmer_released(
         self,
         session: AsyncSession,
         farmer: User | None,
@@ -699,66 +1059,57 @@ class SponsorshipAgent(BaseAgent):
         stage: SponsorshipMilestone,
         releases: list[dict[str, Any]],
     ) -> None:
-        paid_minor = sum(r["amount_minor"] for r in releases if r["status"] == "paid")
-        if paid_minor <= 0:
-            await self._notify(
-                farmer,
-                f"Yieldra: Your photo for '{stage.title}' is verified. The sponsor's payment "
-                f"is being processed; we will message you when it is released.",
-            )
+        """Tell the farmer what happened to the tranche(s) their photo unlocked."""
+        if farmer is None:
             return
-        sponsorship = await session.get(Sponsorship, releases[0]["sponsorship_id"])
-        milestones = await self._milestones(session, sponsorship.id) if sponsorship else []
-        nxt = next((m for m in milestones if m.sequence == stage.sequence + 1), None)
-        next_line = (
-            f"Next stage: {nxt.title}. Send a photo with the caption PROOF when it is done."
-            if nxt is not None
-            else "This sponsorship is complete. Well done."
-        )
-        await self._notify(
-            farmer,
-            f"Yieldra: Verified. '{stage.title}' is confirmed for "
-            f"{farm.name if farm else 'your farm'} and {format_usd(paid_minor)} is released. "
-            f"{next_line}",
-        )
-
-    async def _notify(self, user: User | None, text: str, localise: bool = True) -> None:
-        """Send a chat message. Never raises: messaging must not undo a payment."""
-        if user is None:
-            return
-        try:
-            if localise:
-                text = await self._localise(text, user.language_preference.value)
-            await send_text_message(user.phone, text)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("notify failed user=%s: %s", user.id, type(exc).__name__)
-
-    async def _localise(self, text: str, language: str) -> str:
-        """Translate a system message into the user's language; English on any failure."""
-        if language == "english" or not settings.llm_live:
-            return text
-        try:
-            translated = await self.run(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Translate this message into {language} for a Nigerian farmer. "
-                            "Keep names, amounts and the word PROOF exactly as written. "
-                            f"Reply with the translation only.\n\n{text}"
-                        ),
-                    }
-                ]
+        farm_name = farm.name if farm else "your farm"
+        paid = [r for r in releases if r["status"] == "paid"]
+        requested = [r for r in releases if r["status"] == "awaiting_payment"]
+        parts = [f"Yieldra: Verified. '{stage.title}' is confirmed for {farm_name}."]
+        if paid:
+            kobo = sum(r.get("farmer_kobo", 0) for r in paid)
+            needs_bank = any(
+                r.get("farmer_payout_status") == DisbursementStatus.needs_bank_details.value
+                for r in paid
             )
-        except Exception:  # noqa: BLE001
-            return text
-        return translated.strip() or text
+            if needs_bank:
+                parts.append(
+                    f"{format_naira(kobo)} is waiting for you. To receive it, reply: BANK "
+                    f"<bank code> <account number> (send BANKS to see the codes)."
+                )
+            elif kobo:
+                parts.append(f"{format_naira(kobo)} is being sent to your bank account.")
+        if requested:
+            kobo = sum(r["amount_minor"] for r in requested)
+            parts.append(
+                f"Your sponsor has been asked to pay {format_naira(kobo)}. We will message "
+                f"you when it lands."
+            )
+        if not paid and not requested:
+            parts.append(
+                "The sponsor's payment is being processed; we will message you when it is "
+                "released."
+            )
+        if paid:
+            sponsorship = await session.get(Sponsorship, paid[0]["sponsorship_id"])
+            milestones = await self._milestones(session, sponsorship.id) if sponsorship else []
+            nxt = next((m for m in milestones if m.sequence == stage.sequence + 1), None)
+            parts.append(
+                f"Next stage: {nxt.title}. Send a photo with the caption PROOF when it is done."
+                if nxt is not None
+                else "This sponsorship is complete. Well done."
+            )
+        await notify(farmer, " ".join(parts))
 
+    # -- internals: queries -----------------------------------------------
     @staticmethod
-    async def _by_order(session: AsyncSession, order_id: str) -> Sponsorship | None:
-        result = await session.execute(
-            select(Sponsorship).where(Sponsorship.paypal_order_id == order_id)
-        )
+    async def _by_order(
+        session: AsyncSession, order_id: str, lock: bool = False
+    ) -> Sponsorship | None:
+        stmt = select(Sponsorship).where(Sponsorship.paypal_order_id == order_id)
+        if lock:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        result = await session.execute(stmt)
         return result.scalars().first()
 
     @staticmethod

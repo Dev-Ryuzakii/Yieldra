@@ -13,11 +13,14 @@ from app.config import settings
 from app.redis_client import close_redis
 from app.telegram_poller import poll_forever
 from app.routers import (
+    console,
     farms,
     health,
     investments,
     logistics,
     offtake,
+    pages,
+    payouts,
     reference,
     reports,
     sponsorships,
@@ -52,7 +55,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Yieldra",
-    description="AI-powered fractional farm investment and autonomous supply chain platform.",
+    description="Sponsor a farm and pay as it grows: PayPal and Tuago payments released on AI-verified farm milestones.",
     version=__version__,
     lifespan=lifespan,
 )
@@ -74,18 +77,14 @@ app.include_router(logistics.router)
 app.include_router(offtake.router)
 app.include_router(reports.router)
 app.include_router(sponsorships.router)
+app.include_router(payouts.router)
+app.include_router(console.router)
+app.include_router(pages.router)
 app.include_router(webhooks.router)
 
-# Serve generated contract PDFs at /static/contracts/<file>.
+# Serve generated files: contract PDFs at /static/contracts/, farm photos at /static/evidence/.
 os.makedirs(os.path.join("generated", "contracts"), exist_ok=True)
+os.makedirs(os.path.join("generated", "evidence"), exist_ok=True)
 app.mount("/static", StaticFiles(directory="generated"), name="static")
-
-
-@app.get("/")
-async def root() -> dict:
-    return {
-        "name": "Yieldra",
-        "tagline": "Invest in a farm. Let AI run it.",
-        "version": __version__,
-        "docs": "/docs",
-    }
+# Stylesheets and scripts for the web pages (see app/routers/pages.py).
+app.mount("/assets", StaticFiles(directory=os.path.join(pages.WEB_DIR, "assets")), name="assets")

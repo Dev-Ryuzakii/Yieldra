@@ -1,0 +1,51 @@
+# Render blueprint: the API, the web pages and a PostgreSQL database.
+#   1. Push this repo, then in Render choose New > Blueprint and pick it.
+#   2. Fill in the values marked "sync: false" when Render asks.
+#   3. Set PUBLIC_BASE_URL to the service's https://...onrender.com address, then
+#      register <that address>/webhook/paypal and /webhook/tuago with PayPal and Tuago.
+#
+# Not included: the Celery worker and Redis used by the scheduled harvest and report
+# tasks. The sponsorship flow does not need them.
+
+services:
+  - type: web
+    name: yieldra
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    dockerCommand: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: yieldra-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: LLM_PROVIDER
+        value: anthropic
+      - key: LLM_API_KEY
+        sync: false
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: TUAGO_SECRET_KEY
+        sync: false
+      - key: TUAGO_WEBHOOK_SECRET
+        sync: false
+      - key: USD_NGN_RATE
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+
+databases:
+  - name: yieldra-db
+    plan: free

@@ -2,8 +2,9 @@
 
 Runs daily at 09:00 WAT (see beat schedule). Finds sold harvests that still
 have active (unpaid) investments and a signed/paid offtake contract, then asks
-the Investment Agent to distribute proceeds pro-rata via Paystack. Payouts above
-₦100,000 are held for investor Telegram approval (handled inside the agent).
+the Investment Agent to work out each investor's share pro-rata and queue it for a
+manual transfer (Tuago, the naira rail, has no payout API). Payouts above ₦100,000
+are held for investor Telegram approval (handled inside the agent).
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ async def _distribute_all(session: AsyncSession) -> dict[str, Any]:
             select(Investment.id).where(
                 Investment.farm_id == harvest.farm_id,
                 Investment.status == InvestmentStatus.active,
+                Investment.actual_return_ngn == 0,
             )
         )
         if active.first() is None:

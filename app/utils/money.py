@@ -21,3 +21,10 @@ def usd_to_cents(usd: float | int) -> int:
 def format_usd(cents: int) -> str:
     """Human string, e.g. 2500 cents -> '$25.00'."""
     return f"${cents / 100:,.2f}"
+
+
+def format_money(minor: int, currency: str) -> str:
+    """Format minor units of a currency: USD cents or NGN kobo."""
+    if (currency or "").upper() == "NGN":
+        return format_naira(minor)
+    return format_usd(minor)

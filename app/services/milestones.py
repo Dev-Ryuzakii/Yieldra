@@ -15,8 +15,15 @@ _PLANTED_BPS = 3000
 _ESTABLISHED_BPS = 3000
 _HARVEST_BPS = 2000
 
-MIN_TOTAL_MINOR = 1_000        # $10.00
-MAX_TOTAL_MINOR = 1_000_000    # $10,000.00
+# Smallest and largest sponsorship per currency, in minor units.
+_LIMITS: dict[str, tuple[int, int]] = {
+    "USD": (1_000, 1_000_000),        # $10 to $10,000
+    "NGN": (500_000, 500_000_000),    # NGN 5,000 to NGN 5,000,000
+}
+
+
+def limits_for(currency: str) -> tuple[int, int]:
+    return _LIMITS[currency.upper()]
 
 
 @dataclass(frozen=True)

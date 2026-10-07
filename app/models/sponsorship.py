@@ -1,11 +1,16 @@
 """Sponsorship models — a sponsor funds a farm in tranches released on verified milestones.
 
-A ``Sponsorship`` is paid through PayPal. The first tranche is captured when the
-sponsor approves, which also saves their PayPal account; each later tranche is
-charged to that saved account only after the farmer's photo for the matching
-``SponsorshipMilestone`` passes verification.
+A ``Sponsorship`` is paid on one of two rails:
 
-Money is stored as integers in minor units of ``currency`` (US cents for USD).
+  * PayPal (USD): the first tranche is captured when the sponsor approves, which also
+    saves their PayPal account; each later tranche is charged to that saved account.
+  * Tuago (NGN): every tranche is a Tuago checkout the sponsor pays by bank transfer,
+    routed through the farmer's subaccount so the farmer's share settles to their bank.
+
+On both rails a tranche after the first is only collected once the farmer's photo
+for the matching ``SponsorshipMilestone`` passes verification.
+
+Money is stored as integers in minor units of ``currency`` (US cents, or kobo).
 """
 
 import enum
@@ -39,7 +44,15 @@ class MilestoneStatus(str, enum.Enum):
     awaiting_evidence = "awaiting_evidence"  # farmer should send a photo
     needs_review = "needs_review"            # verification unsure; a person decides
     payment_failed = "payment_failed"        # verified, but the PayPal charge failed
+    awaiting_payment = "awaiting_payment"    # verified; naira sponsor has been sent a link
     paid = "paid"                            # verified and charged
+
+
+class Rail(str, enum.Enum):
+    """How the sponsor pays. Decides the currency and how later tranches are collected."""
+
+    paypal = "paypal"  # USD; later tranches are charged to the saved PayPal account
+    tuago = "tuago"    # NGN; each tranche is a Tuago checkout the sponsor pays
 
 
 class Sponsorship(Base, TimestampMixin):
@@ -52,6 +65,9 @@ class Sponsorship(Base, TimestampMixin):
     sponsor_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
     total_minor: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), default="USD", nullable=False)
+    rail: Mapped[str] = mapped_column(
+        String(10), default=Rail.paypal.value, server_default=Rail.paypal.value, nullable=False
+    )
     status: Mapped[SponsorshipStatus] = mapped_column(
         Enum(SponsorshipStatus, name="sponsorship_status"),
         default=SponsorshipStatus.pending_approval,
@@ -102,11 +118,19 @@ class SponsorshipMilestone(Base, TimestampMixin):
 
     # Latest verification of the farmer's photo.
     evidence_sha256: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    # Stored copy of that photo, relative to the generated/ folder.
+    evidence_photo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # The update written for the sponsor when this tranche was released.
+    sponsor_update: Mapped[str | None] = mapped_column(Text, nullable=True)
     verdict_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     verdict_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3), nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Payment for this tranche.
+    # Tuago rail: the open checkout the sponsor must pay.
+    tuago_session_id: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
+    payment_reference: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
+    payment_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     paypal_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     paypal_capture_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

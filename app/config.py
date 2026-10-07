@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Default model per agent, by LLM provider. Any of them can be overridden with the
@@ -61,14 +61,25 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # Paystack (naira leg: local payments and farmer payouts)
-    paystack_secret_key: str = "sk_live_xxx"
-    paystack_public_key: str = "pk_live_xxx"
+    # Tuago (naira leg: naira sponsors pay in, farmers are paid out by split settlement).
+    # The key decides the environment: sk_test_... is Tuago's sandbox, sk_live_... is real.
+    tuago_secret_key: str = "xxx"
+    tuago_webhook_secret: str = "xxx"
+    tuago_base_url: str = "https://api.gettuago.com"
+    # Yieldra's cut of each naira collection, in basis points (0 = farmer gets it all,
+    # less Tuago's own fee).
+    tuago_platform_fee_bps: int = 0
 
     # PayPal (international leg: sponsor payments). PAYPAL_ENV is "sandbox" or "live".
     paypal_client_id: str = "xxx"
     paypal_client_secret: str = "xxx"
     paypal_env: str = "sandbox"
+    # Id of the webhook registered on the PayPal app; needed to verify PayPal webhooks.
+    paypal_webhook_id: str = "xxx"
+
+    # Naira paid to the farmer per US dollar of a PayPal tranche. Set this yourself:
+    # the default is only a placeholder so development runs.
+    usd_ngn_rate: float = 1500.0
 
     # Telegram Bot API
     telegram_bot_token: str = "xxx"
@@ -81,6 +92,8 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000"
     # Public address of this API. PayPal sends the sponsor back here after approval.
     public_base_url: str = "http://localhost:8000"
+    # Contact email Tuago shows on the checkouts Yieldra itself pays (farmer payouts).
+    operator_email: str = "operator@example.com"
 
     # Milestone verification thresholds (model confidence, 0-1).
     #   >= release  -> the tranche is charged automatically
@@ -97,6 +110,16 @@ class Settings(BaseSettings):
     model_report: str = ""
     model_vision: str = ""
     model_milestone: str = ""
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _async_database_url(cls, value: str) -> str:
+        """Hosts such as Render hand out postgres:// URLs; the app needs the asyncpg driver."""
+        value = str(value or "")
+        for prefix in ("postgres://", "postgresql://"):
+            if value.startswith(prefix):
+                return "postgresql+asyncpg://" + value[len(prefix):]
+        return value
 
     @model_validator(mode="after")
     def _fill_model_defaults(self) -> "Settings":
@@ -146,9 +169,14 @@ class Settings(BaseSettings):
 
     # -- Payments / channels -------------------------------------------------
     @property
-    def paystack_live(self) -> bool:
-        """True once a real Paystack secret key is configured (not a placeholder)."""
-        return not self._is_placeholder(self.paystack_secret_key)
+    def tuago_live(self) -> bool:
+        """True once a real Tuago secret key is configured (test or live)."""
+        return self.tuago_secret_key.startswith(("sk_test_", "sk_live_"))
+
+    @property
+    def tuago_test_mode(self) -> bool:
+        """True in mock mode or with a Tuago sandbox key: payments can be simulated."""
+        return not self.tuago_secret_key.startswith("sk_live_")
 
     @property
     def paypal_live(self) -> bool:

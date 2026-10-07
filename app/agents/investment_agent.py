@@ -1,4 +1,7 @@
-"""Investment Agent — farm funding, share tokenization, return distribution.
+"""Investment Agent — naira farm funding, share records, return distribution.
+
+Naira payments are collected and verified through Tuago. Tuago has no API for sending
+money, so investor returns are calculated and queued here for a manual transfer.
 
 Model: settings.model_investment (complex financial reasoning).
 Human-in-the-loop: payouts above ₦100,000 pause for investor Telegram approval.
@@ -19,7 +22,7 @@ from app.models.farm import Farm, FarmPlot, FarmStatus, PlotStatus
 from app.models.investment import Investment, InvestmentStatus
 from app.models.user import User
 from app.services.reference import crop_return_multiplier
-from app.tools import paystack
+from app.tools import tuago
 from app.tools.telegram import send_text_message
 from app.utils.logger import get_logger
 from app.utils.money import format_naira, naira_to_kobo
@@ -32,7 +35,7 @@ PAYOUT_APPROVAL_THRESHOLD = naira_to_kobo(100_000)
 
 SYSTEM_PROMPT = (
     "You are Yieldra's Investment Agent. You manage farm investment transactions on "
-    "behalf of investors. You can create investment records, verify Paystack payments, "
+    "behalf of investors. You can create investment records, verify Tuago payments, "
     "tokenize farm plot shares, and send Telegram confirmations. Always confirm investment "
     "amounts before creating records. Investments above ₦500,000 require explicit investor "
     "re-confirmation. Respond in the investor's preferred language."
@@ -63,9 +66,15 @@ class InvestmentAgent(BaseAgent):
         if farm is None or investor is None:
             return {"status": "error", "message": "farm or investor not found"}
 
-        # Verify the Paystack payment.
-        verification = await paystack.verify_payment(payment_reference)
-        if verification.get("status") != "success":
+        # Verify the naira payment with Tuago.
+        try:
+            verification = await tuago.verify_charge(payment_reference)
+        except tuago.TuagoError as exc:
+            return {"status": "payment_failed", "verification": {"code": exc.code}}
+        if not tuago.is_paid(verification.get("status")):
+            return {"status": "payment_failed", "verification": verification}
+        if not verification.get("mock") and verification.get("amount_minor") != amount_kobo:
+            # Paid, but not the amount this investment claims.
             return {"status": "payment_failed", "verification": verification}
 
         # Human-in-the-loop: large investments need re-confirmation.
@@ -159,6 +168,8 @@ class InvestmentAgent(BaseAgent):
             select(Investment).where(
                 Investment.farm_id == harvest.farm_id,
                 Investment.status == InvestmentStatus.active,
+                # A recorded return means this payout is already queued.
+                Investment.actual_return_ngn == 0,
             )
         )
         investments = list(result.scalars())
@@ -187,25 +198,17 @@ class InvestmentAgent(BaseAgent):
                 )
                 continue
 
-            recipient = await paystack.create_transfer_recipient(
-                name=investor.name if investor else "investor",
-                account_number="0000000000",
-                bank_code="058",
-            )
-            transfer = await paystack.initiate_payout(
-                recipient_code=recipient["recipient_code"],
-                amount=payout_kobo,
-                reason=f"Yieldra return harvest {harvest_id}",
-            )
+            # No programmatic payout rail: record what is owed and queue it for a
+            # manual transfer. The investment stays active until that is done.
             inv.actual_return_ngn = payout_kobo
-            inv.status = InvestmentStatus.completed
             payouts.append(
-                {"investment_id": inv.id, "payout_kobo": payout_kobo, "transfer": transfer}
+                {"investment_id": inv.id, "payout_kobo": payout_kobo, "transfer": "manual"}
             )
             if investor is not None:
                 await send_text_message(
                     investor.phone,
-                    f"Yieldra: {format_naira(payout_kobo)} sent to your account. Thank you for investing!",
+                    f"Yieldra: Your return of {format_naira(payout_kobo)} is confirmed and is "
+                    f"being paid to your account.",
                 )
 
         await session.flush()

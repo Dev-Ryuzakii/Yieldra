@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Operator console · Yieldra</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <header class="wrap site-header">
+    <a class="wordmark" href="/">Yieldra</a>
+    <nav class="site-nav" aria-label="Site"><a href="/">Sponsor pages</a><a href="/docs">API</a></nav>
+  </header>
+
+  <main class="wrap">
+    <p class="notice" id="mode" hidden></p>
+    <div class="console-head">
+      <div>
+        <h1>Operator console</h1>
+        <p class="modes" id="modes"></p>
+      </div>
+      <form class="key" id="key-form" hidden>
+        <div class="field">
+          <label for="key">Operator key</label>
+          <input type="password" id="key" autocomplete="off" placeholder="SECRET_KEY">
+        </div>
+      </form>
+    </div>
+
+    <div class="toolbar">
+      <input type="text" id="search" placeholder="Search farm, sponsor, stage" aria-label="Search the ledger">
+      <select id="filter" aria-label="Show" style="width:auto">
+        <option value="">All tranches</option>
+        <option value="needs_review">Needs review</option>
+        <option value="payment_failed">Payment failed</option>
+        <option value="awaiting_payment">Awaiting sponsor payment</option>
+        <option value="payout">Farmer payout to fund</option>
+      </select>
+      <button class="button quiet small" type="button" id="reload">Refresh</button>
+      <button class="button quiet small" type="button" id="export">Download CSV</button>
+      <span class="count" id="count"></span>
+    </div>
+    <p class="error-text" id="ledger-error" role="alert"></p>
+    <div id="grid"></div>
+
+    <div class="console-cols">
+      <section class="panel" id="detail" aria-live="polite">
+        <h2>Tranche</h2>
+        <p class="hint">Select a row to see its photo, verdict and actions.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Add a farm photo</h2>
+        <p class="hint" style="margin-bottom:1rem">Farmers send photos in chat with the caption PROOF. Use this to submit one for them.</p>
+        <form id="evidence-form">
+          <div class="field">
+            <label for="evidence-farm">Farm</label>
+            <select id="evidence-farm" required></select>
+          </div>
+          <div class="field">
+            <label for="evidence-file">Photo</label>
+            <input type="file" id="evidence-file" accept="image/jpeg,image/png,image/webp" required>
+          </div>
+          <button class="button" type="submit" id="evidence-submit">Check photo</button>
+        </form>
+        <p class="result" id="evidence-result" role="status"></p>
+
+        <h2 style="margin-top:2rem">Farmer bank account</h2>
+        <form id="bank-form">
+          <div class="field">
+            <label for="bank-farmer">Farmer</label>
+            <select id="bank-farmer" required></select>
+          </div>
+          <div class="field">
+            <label for="bank-code">Bank</label>
+            <select id="bank-code" required></select>
+          </div>
+          <div class="field">
+            <label for="bank-number">Account number</label>
+            <input type="text" id="bank-number" inputmode="numeric" pattern="\d{10}" maxlength="10" required>
+          </div>
+          <button class="button" type="submit">Verify and save account</button>
+        </form>
+        <p class="result" id="bank-result" role="status"></p>
+      </section>
+    </div>
+  </main>
+
+  <script src="/assets/vendor/ag-grid-community.min.js"></script>
+  <script type="module" src="/assets/console.js"></script>
+</body>
+</html>

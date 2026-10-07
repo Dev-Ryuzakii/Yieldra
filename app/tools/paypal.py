@@ -15,6 +15,7 @@ of Yieldra stores money (kobo for NGN).
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from typing import Any
@@ -360,3 +361,43 @@ PAYPAL_TOOLS: list[Tool] = [
         handler=get_order,
     ),
 ]
+
+
+# -- webhooks --------------------------------------------------------------
+async def verify_webhook(headers: dict[str, str], raw_body: bytes) -> bool:
+    """Ask PayPal whether a webhook delivery is genuine.
+
+    Needs PAYPAL_WEBHOOK_ID (the id PayPal shows for the webhook registered on the
+    app). The event is embedded byte-for-byte, because PayPal signs the raw body.
+    """
+    if not settings.paypal_live or settings._is_placeholder(settings.paypal_webhook_id):
+        return False
+    lowered = {k.lower(): v for k, v in headers.items()}
+    fields = {
+        "auth_algo": lowered.get("paypal-auth-algo"),
+        "cert_url": lowered.get("paypal-cert-url"),
+        "transmission_id": lowered.get("paypal-transmission-id"),
+        "transmission_sig": lowered.get("paypal-transmission-sig"),
+        "transmission_time": lowered.get("paypal-transmission-time"),
+        "webhook_id": settings.paypal_webhook_id,
+    }
+    if not all(fields.values()):
+        return False
+    try:
+        event_text = raw_body.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    body = json.dumps(fields)[:-1] + ',"webhook_event":' + event_text + "}"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        resp = await client.post(
+            f"{settings.paypal_api_base}/v1/notifications/verify-webhook-signature",
+            content=body.encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {await _access_token()}",
+                "Content-Type": "application/json",
+            },
+        )
+    if resp.status_code != 200:
+        log.warning("paypal webhook verification call failed status=%s", resp.status_code)
+        return False
+    return resp.json().get("verification_status") == "SUCCESS"

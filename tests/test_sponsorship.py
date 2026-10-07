@@ -74,8 +74,11 @@ async def test_confirm_pays_first_tranche_and_saves_payment_method(agent, sessio
 
     to_farmer = [text for chat, text in sent if chat == world.farmer.phone]
     to_sponsor = [text for chat, text in sent if chat == world.sponsor.phone]
-    assert "PROOF" in to_farmer[0] and "$30.00" in to_farmer[0]
+    # The farmer is told in naira ($20 at the test rate of 1,500) and how to get paid.
+    assert "PROOF" in to_farmer[0] and "₦30,000.00" in to_farmer[0]
+    assert "BANK <bank code> <account number>" in to_farmer[0]
     assert "$20.00" in to_sponsor[0] and "$100.00" in to_sponsor[0]
+    assert s["track_url"] in to_sponsor[0]
 
 
 async def test_confirming_twice_does_not_capture_twice(agent, session, world, monkeypatch):
@@ -120,7 +123,10 @@ async def test_verified_photo_releases_the_next_tranche(agent, session, world, s
     to_sponsor = [text for chat, text in sent if chat == world.sponsor.phone]
     to_farmer = [text for chat, text in sent if chat == world.farmer.phone]
     assert "$30.00" in to_sponsor[0] and "Planting complete" in to_sponsor[0]
-    assert "$30.00" in to_farmer[0] and "Crop established" in to_farmer[0]
+    assert "₦45,000.00" in to_farmer[0] and "Crop established" in to_farmer[0]
+    # The update is kept so the sponsor can read it on their page too.
+    assert s["milestones"][1]["sponsor_update"] == to_sponsor[0]
+    assert s["milestones"][1]["evidence_photo_url"].startswith("/static/evidence/")
 
 
 async def test_rejected_photo_moves_no_money(agent, session, world, sent, verifier, monkeypatch):
@@ -284,6 +290,7 @@ async def test_declined_charge_can_be_retried_with_a_fresh_key(
         "sponsorship_id": s["id"],
         "milestone_id": s["milestones"][1]["id"],
         "amount_minor": 3000,
+        "rail": "paypal",
         "status": "payment_failed",  # ...but the money did not move
         "issue": "INSTRUMENT_DECLINED",
     }
@@ -412,7 +419,7 @@ async def test_failed_chat_message_never_undoes_a_payment(agent, session, world,
     async def broken_send(phone, message):
         raise httpx.ConnectError("telegram down")
 
-    monkeypatch.setattr("app.agents.sponsorship_agent.send_text_message", broken_send)
+    monkeypatch.setattr("app.services.notify.send_text_message", broken_send)
     s = await start_and_confirm(agent, session, world)
 
     result = await agent.submit_evidence(session, world.farm.id, photo("planted"))
