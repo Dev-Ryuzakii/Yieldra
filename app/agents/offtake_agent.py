@@ -1,6 +1,6 @@
 """Offtake Matching Agent — match ready harvests to buyers, generate contracts.
 
-Model: qwen-max (negotiation + contract generation).
+Model: settings.model_offtake (negotiation + contract generation).
 Rules: never finalize without explicit confirmation from BOTH farmer and buyer.
 Contracts above ₦500,000 require a 48-hour review period before signing.
 """

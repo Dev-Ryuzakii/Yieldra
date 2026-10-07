@@ -23,11 +23,14 @@ from app.models.harvest import ColdStorageBooking, Harvest, HarvestStatus
 from app.models.investment import Investment, InvestmentStatus
 from app.models.offtake import ContractStatus, OfftakeContract
 from app.models.reference import ColdStorageFacility, CropParameter
+from app.models.sponsorship import Sponsorship, SponsorshipMilestone
 from app.models.user import Language, User, UserRole
 from app.utils.money import naira_to_kobo
 
 # Order matters: children before parents (FK constraints).
 _TABLES_IN_DELETE_ORDER = [
+    SponsorshipMilestone,
+    Sponsorship,
     OfftakeContract,
     ColdStorageBooking,
     Harvest,
@@ -124,6 +127,15 @@ async def _seed(session) -> None:
              language_preference=Language.english),
     ]
     session.add_all(investors)
+
+    # -- Sponsors (diaspora, pay in USD through PayPal) --------------------
+    sponsors = [
+        User(name="Kemi Adebayo", phone="+447700900101", role=UserRole.sponsor,
+             language_preference=Language.english),
+        User(name="Tolu Okoro", phone="+12025550142", role=UserRole.sponsor,
+             language_preference=Language.english),
+    ]
+    session.add_all(sponsors)
 
     # -- Buyers -----------------------------------------------------------
     restaurant = User(name="Lagos Kitchen Ltd", phone="+2348032002001", role=UserRole.buyer,
@@ -241,7 +253,7 @@ async def main() -> None:
         await _seed(session)
         await session.commit()
     await engine.dispose()
-    print("Seed complete: 3 farmers, 5 investors, 2 buyers, 3 farms, 2 harvests.")
+    print("Seed complete: 3 farmers, 5 investors, 2 sponsors, 2 buyers, 3 farms, 2 harvests.")
 
 
 if __name__ == "__main__":

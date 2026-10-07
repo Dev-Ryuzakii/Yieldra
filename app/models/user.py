@@ -1,4 +1,4 @@
-"""User model — farmers, investors, buyers, logistics operators."""
+"""User model — farmers, investors, sponsors, buyers, logistics operators."""
 
 import enum
 
@@ -14,6 +14,7 @@ class UserRole(str, enum.Enum):
     investor = "investor"
     buyer = "buyer"
     logistics = "logistics"
+    sponsor = "sponsor"
 
 
 class Language(str, enum.Enum):

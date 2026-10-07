@@ -20,6 +20,7 @@ from app.routers import (
     offtake,
     reference,
     reports,
+    sponsorships,
     users,
     webhooks,
 )
@@ -72,6 +73,7 @@ app.include_router(investments.router)
 app.include_router(logistics.router)
 app.include_router(offtake.router)
 app.include_router(reports.router)
+app.include_router(sponsorships.router)
 app.include_router(webhooks.router)
 
 # Serve generated contract PDFs at /static/contracts/<file>.

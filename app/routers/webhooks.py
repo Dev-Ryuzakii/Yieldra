@@ -18,8 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.advisory_agent import AdvisoryAgent
 from app.agents.logistics_agent import LogisticsAgent
 from app.agents.report_agent import ReportAgent
+from app.agents.sponsorship_agent import SponsorshipAgent
 from app.config import settings
 from app.database import get_session
+from app.models.farm import Farm
 from app.models.harvest import Harvest, HarvestStatus
 from app.models.user import Language, User, UserRole
 from app.tools.telegram import get_file_url, send_text_message
@@ -31,14 +33,20 @@ router = APIRouter(prefix="/webhook", tags=["webhook"])
 _advisory = AdvisoryAgent()
 _logistics = LogisticsAgent()
 _report = ReportAgent()
+_sponsorship = SponsorshipAgent()
 
 # Keywords that indicate a logistics update rather than an advisory question.
 _LOGISTICS_KEYWORDS = {"ready", "harvest", "truck", "pickup", "storage", "deliver", "delivered"}
+
+# A photo captioned with one of these is milestone evidence for a sponsorship,
+# not a crop-health question.
+_EVIDENCE_KEYWORDS = {"proof", "milestone", "evidence"}
 
 # Onboarding: map a role reply to a UserRole.
 _ROLE_WORDS = {
     "farmer": UserRole.farmer,
     "investor": UserRole.investor,
+    "sponsor": UserRole.sponsor,
     "buyer": UserRole.buyer,
 }
 
@@ -108,7 +116,7 @@ async def _onboard(
         await send_text_message(
             chat_id,
             "Welcome to Yieldra! Reply with your role to get started: "
-            "FARMER, INVESTOR, or BUYER.",
+            "FARMER, SPONSOR, INVESTOR, or BUYER.",
         )
         return {"status": "onboarding", "chat_id": chat_id}
 
@@ -132,6 +140,11 @@ async def _route(
     session: AsyncSession, user: User, text: str, photo_url: str | None
 ) -> dict[str, Any]:
     if user.role == UserRole.farmer:
+        if photo_url is not None and _is_evidence(text):
+            farm = await _farm_for_farmer(session, user.id)
+            if farm is not None:
+                result = await _sponsorship.submit_evidence(session, farm.id, photo_url)
+                return {"agent": "sponsorship", **result}
         if photo_url is None and _is_logistics_update(text):
             harvest = await _active_harvest_for_farmer(session, user.id)
             if harvest is not None:
@@ -149,6 +162,11 @@ async def _route(
             await send_text_message(user.phone, report)
         return {"agent": "report", "content": report}
 
+    if user.role == UserRole.sponsor:
+        summary = await _sponsorship.status_text(session, user.id)
+        await send_text_message(user.phone, summary)
+        return {"agent": "sponsorship", "content": summary}
+
     if user.role == UserRole.buyer:
         await send_text_message(
             user.phone,
@@ -158,6 +176,18 @@ async def _route(
 
     await send_text_message(user.phone, "Yieldra received your message.")
     return {"agent": "none"}
+
+
+def _is_evidence(text: str) -> bool:
+    tokens = {t.strip(".,!?:").lower() for t in text.split()}
+    return bool(tokens & _EVIDENCE_KEYWORDS)
+
+
+async def _farm_for_farmer(session: AsyncSession, farmer_id: int) -> Farm | None:
+    result = await session.execute(
+        select(Farm).where(Farm.farmer_id == farmer_id).order_by(Farm.id).limit(1)
+    )
+    return result.scalars().first()
 
 
 def _is_logistics_update(text: str) -> bool:
@@ -171,8 +201,6 @@ async def _find_user(session: AsyncSession, chat_id: str) -> User | None:
 
 
 async def _active_harvest_for_farmer(session: AsyncSession, farmer_id: int) -> Harvest | None:
-    from app.models.farm import Farm
-
     result = await session.execute(
         select(Harvest)
         .join(Farm, Harvest.farm_id == Farm.id)

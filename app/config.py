@@ -2,7 +2,32 @@
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Default model per agent, by LLM provider. Any of them can be overridden with the
+# matching MODEL_* environment variable.
+_DEFAULT_MODELS: dict[str, dict[str, str]] = {
+    "anthropic": {
+        "model_investment": "claude-sonnet-5-5",
+        "model_logistics": "claude-sonnet-5-5",
+        "model_offtake": "claude-sonnet-5-5",
+        "model_advisory": "claude-haiku-4-5-20251001",
+        "model_report": "claude-haiku-4-5-20251001",
+        "model_vision": "claude-sonnet-5-5",
+        "model_milestone": "claude-sonnet-5-5",
+    },
+    # OpenAI-compatible endpoints (Qwen on Alibaba Cloud Model Studio by default).
+    "openai": {
+        "model_investment": "qwen3.7-max",
+        "model_logistics": "qwen3.7-max",
+        "model_offtake": "qwen3.7-max",
+        "model_advisory": "qwen3.6-flash",
+        "model_report": "qwen3.6-flash",
+        "model_vision": "qwen3.7-plus",
+        "model_milestone": "qwen3.7-plus",
+    },
+}
 
 
 class Settings(BaseSettings):
@@ -13,9 +38,20 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        protected_namespaces=("settings_",),
     )
 
-    # Qwen / Alibaba Cloud
+    # LLM provider.
+    #   anthropic — Claude through the Anthropic Messages API. Set LLM_BASE_URL to use
+    #               an Anthropic-compatible gateway instead of api.anthropic.com.
+    #   openai    — any OpenAI-compatible chat-completions endpoint (Qwen, etc.).
+    llm_provider: str = "anthropic"
+    llm_api_key: str = "xxx"
+    llm_base_url: str = ""
+    llm_max_tokens: int = 1024
+
+    # Legacy Qwen / Alibaba Cloud settings. Used only when LLM_PROVIDER=openai and the
+    # generic LLM_API_KEY / LLM_BASE_URL are not set.
     dashscope_api_key: str = "sk-xxx"
     qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
@@ -25,9 +61,14 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # Paystack
+    # Paystack (naira leg: local payments and farmer payouts)
     paystack_secret_key: str = "sk_live_xxx"
     paystack_public_key: str = "pk_live_xxx"
+
+    # PayPal (international leg: sponsor payments). PAYPAL_ENV is "sandbox" or "live".
+    paypal_client_id: str = "xxx"
+    paypal_client_secret: str = "xxx"
+    paypal_env: str = "sandbox"
 
     # Telegram Bot API
     telegram_bot_token: str = "xxx"
@@ -38,14 +79,36 @@ class Settings(BaseSettings):
     app_env: str = "development"
     secret_key: str = "change-this-in-production"
     allowed_origins: str = "http://localhost:3000"
+    # Public address of this API. PayPal sends the sponsor back here after approval.
+    public_base_url: str = "http://localhost:8000"
 
-    # Qwen model assignment per agent — Token Plan (Team Edition) available models.
-    model_investment: str = "qwen3.7-max"
-    model_logistics: str = "qwen3.7-max"
-    model_offtake: str = "qwen3.7-max"
-    model_advisory: str = "qwen3.6-flash"
-    model_report: str = "qwen3.6-flash"
-    model_vision: str = "qwen3.7-plus"
+    # Milestone verification thresholds (model confidence, 0-1).
+    #   >= release  -> the tranche is charged automatically
+    #   >= review   -> held for a human reviewer
+    #   below       -> rejected; the farmer is asked for a clearer photo
+    milestone_release_confidence: float = 0.75
+    milestone_review_confidence: float = 0.50
+
+    # Model assignment per agent. Blank means "use the provider default" above.
+    model_investment: str = ""
+    model_logistics: str = ""
+    model_offtake: str = ""
+    model_advisory: str = ""
+    model_report: str = ""
+    model_vision: str = ""
+    model_milestone: str = ""
+
+    @model_validator(mode="after")
+    def _fill_model_defaults(self) -> "Settings":
+        self.llm_provider = (self.llm_provider or "anthropic").strip().lower()
+        if self.llm_provider not in _DEFAULT_MODELS:
+            raise ValueError(
+                f"LLM_PROVIDER must be one of {sorted(_DEFAULT_MODELS)}, got {self.llm_provider!r}"
+            )
+        for field, default in _DEFAULT_MODELS[self.llm_provider].items():
+            if not (getattr(self, field) or "").strip():
+                setattr(self, field, default)
+        return self
 
     @property
     def is_development(self) -> bool:
@@ -57,10 +120,49 @@ class Settings(BaseSettings):
         v = (value or "").strip().lower()
         return v in {"", "xxx", "sk-xxx", "sk_live_xxx", "pk_live_xxx", "change-this-in-production"}
 
+    # -- LLM -----------------------------------------------------------------
+    @property
+    def resolved_llm_api_key(self) -> str:
+        """The key the agents send. Falls back to the legacy Qwen key for provider=openai."""
+        if not self._is_placeholder(self.llm_api_key):
+            return self.llm_api_key
+        if self.llm_provider == "openai":
+            return self.dashscope_api_key
+        return self.llm_api_key
+
+    @property
+    def resolved_llm_base_url(self) -> str | None:
+        """Custom endpoint, or None to use the provider SDK's default."""
+        if self.llm_base_url.strip():
+            return self.llm_base_url.strip()
+        if self.llm_provider == "openai":
+            return self.qwen_base_url
+        return None
+
+    @property
+    def llm_live(self) -> bool:
+        """True once a real LLM key is configured (not a placeholder)."""
+        return not self._is_placeholder(self.resolved_llm_api_key)
+
+    # -- Payments / channels -------------------------------------------------
     @property
     def paystack_live(self) -> bool:
         """True once a real Paystack secret key is configured (not a placeholder)."""
         return not self._is_placeholder(self.paystack_secret_key)
+
+    @property
+    def paypal_live(self) -> bool:
+        """True once real PayPal REST credentials are configured (sandbox or live)."""
+        return not (
+            self._is_placeholder(self.paypal_client_id)
+            or self._is_placeholder(self.paypal_client_secret)
+        )
+
+    @property
+    def paypal_api_base(self) -> str:
+        if self.paypal_env.strip().lower() == "live":
+            return "https://api-m.paypal.com"
+        return "https://api-m.sandbox.paypal.com"
 
     @property
     def telegram_live(self) -> bool:

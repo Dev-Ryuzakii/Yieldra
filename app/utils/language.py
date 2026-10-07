@@ -1,6 +1,6 @@
 """Language detection for farmer messages: Yoruba, Pidgin, Hausa, English.
 
-Fast keyword heuristic first; falls back to asking Qwen to classify when unsure.
+Fast keyword heuristic first; falls back to asking the model to classify when unsure.
 """
 
 from __future__ import annotations
@@ -41,12 +41,12 @@ def detect_language(text: str) -> str:
 
 
 async def detect_language_llm(text: str) -> str:
-    """LLM fallback classifier (qwen-turbo). Use when the heuristic is ambiguous."""
+    """LLM fallback classifier. Use when the heuristic is ambiguous."""
     from app.agents.base import BaseAgent
     from app.config import settings
 
     agent = BaseAgent(
-        model=settings.model_report,  # qwen-turbo: cheap + fast
+        model=settings.model_report,  # the cheap, fast model
         system_prompt=(
             "Classify the language of the message as exactly one word: "
             "yoruba, pidgin, hausa, or english. Reply with only that word."

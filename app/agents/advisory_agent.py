@@ -1,7 +1,7 @@
 """Farmer Advisory Agent — multilingual crop advice over Telegram.
 
-Model: qwen-plus (fast, multilingual: Yoruba / Pidgin / Hausa / English).
-Delegates photo diagnosis to the Crop Vision Agent (qwen-vl-plus).
+Model: settings.model_advisory (fast, multilingual: Yoruba / Pidgin / Hausa / English).
+Delegates photo diagnosis to the Crop Vision Agent.
 """
 
 from __future__ import annotations

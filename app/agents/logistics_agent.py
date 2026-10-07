@@ -1,6 +1,6 @@
 """Harvest Logistics Agent — coordinates harvest pickup, cold storage, transport.
 
-Model: qwen-max (multi-step tool use + decisions).
+Model: settings.model_logistics (multi-step tool use + decisions).
 Rule: never book a truck/storage without farmer confirmation. Handle delays gracefully.
 """
 

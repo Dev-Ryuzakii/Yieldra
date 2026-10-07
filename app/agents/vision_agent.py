@@ -1,6 +1,6 @@
 """Crop Vision Agent — multimodal crop photo diagnosis.
 
-Model: qwen-vl-plus (multimodal). Analyses a farm photo and returns a diagnosis +
+Model: settings.model_vision (multimodal). Analyses a farm photo and returns a diagnosis +
 treatment recommendation in the farmer's language.
 """
 

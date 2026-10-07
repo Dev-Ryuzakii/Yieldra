@@ -1,6 +1,6 @@
 """Investment Agent — farm funding, share tokenization, return distribution.
 
-Model: qwen-max (complex financial reasoning).
+Model: settings.model_investment (complex financial reasoning).
 Human-in-the-loop: payouts above ₦100,000 pause for investor Telegram approval.
 Re-confirmation: investments above ₦500,000 require explicit investor confirmation.
 """

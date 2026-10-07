@@ -1,6 +1,6 @@
 """Portfolio Report Agent — weekly investment performance reports for investors.
 
-Model: qwen-turbo (fast, cheap summaries).
+Model: settings.model_report (fast, cheap summaries).
 Rules: clear friendly language, specific numbers, honest about issues, always end
 with the estimated payout date.
 """

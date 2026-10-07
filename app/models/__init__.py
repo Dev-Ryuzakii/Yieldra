@@ -9,6 +9,12 @@ from app.models.harvest import (
 from app.models.investment import Investment, InvestmentStatus
 from app.models.offtake import ContractStatus, OfftakeContract
 from app.models.reference import ColdStorageFacility, CropParameter
+from app.models.sponsorship import (
+    MilestoneStatus,
+    Sponsorship,
+    SponsorshipMilestone,
+    SponsorshipStatus,
+)
 from app.models.user import Language, User, UserRole
 
 __all__ = [
@@ -28,4 +34,8 @@ __all__ = [
     "InvestmentStatus",
     "ColdStorageFacility",
     "CropParameter",
+    "Sponsorship",
+    "SponsorshipMilestone",
+    "SponsorshipStatus",
+    "MilestoneStatus",
 ]
