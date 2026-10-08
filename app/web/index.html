@@ -1,117 +1,13 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Sponsor a smallholder farm in Nigeria. Your money is released as farm milestones pass a check." />
   <title>Yieldra: sponsor a farm, pay as it grows</title>
-  <meta name="description" content="Sponsor a smallholder farm in Nigeria. Your money is released in four parts, each only after a photo of the farm passes a check.">
-  <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
-  <header class="wrap site-header">
-    <a class="wordmark" href="/">Yieldra</a>
-    <nav class="site-nav" aria-label="Site">
-      <a href="#farms">Farms</a>
-      <a href="#questions">Questions</a>
-      <a href="/console">Operator console</a>
-    </nav>
-  </header>
-
-  <main>
-    <section class="wrap hero">
-      <p class="notice" id="mode" hidden></p>
-      <h1>Sponsor a farm. Pay as it grows.</h1>
-      <p class="lead">Your money reaches a farmer in Nigeria in four parts. The first pays for seed and land. Each part after that is collected only when a photo of the farm passes a check.</p>
-      <div id="example"></div>
-      <p class="caption">Example: a $100 sponsorship of a cassava plot, after planting has been checked.</p>
-    </section>
-
-    <section class="band" id="farms">
-      <div class="wrap">
-        <h2>Farms open to sponsors</h2>
-        <ul class="farms" id="farm-list" aria-live="polite">
-          <li class="empty">Loading farms…</li>
-        </ul>
-      </div>
-    </section>
-
-    <section class="band" id="yours" hidden>
-      <div class="wrap">
-        <h2>Your sponsorships</h2>
-        <ul class="mine" id="mine"></ul>
-      </div>
-    </section>
-
-    <section class="band plain" id="questions">
-      <div class="wrap">
-        <h2>What happens to the money</h2>
-        <dl class="answers">
-          <div>
-            <dt>Who checks the photo?</dt>
-            <dd>An AI model compares the farmer's photo with what that stage should look like and says how sure it is. Clear passes go through. Unsure ones wait for a person. A photo that fails, or has been used before, releases nothing.</dd>
-          </div>
-          <div>
-            <dt>How does the farmer get paid?</dt>
-            <dd>In naira, to their own bank account. The account name is verified by the bank before any payment, and every payout is confirmed by the bank rather than taken on trust.</dd>
-          </div>
-          <div>
-            <dt>What if I change my mind?</dt>
-            <dd>Stop from your sponsorship page at any time. What has been paid stays with the farmer, and nothing more is collected. With PayPal, your saved account is deleted.</dd>
-          </div>
-          <div>
-            <dt>Is this an investment?</dt>
-            <dd>No. You are paying for a farm to be planted and harvested. You get photos and updates, not a financial return.</dd>
-          </div>
-        </dl>
-      </div>
-    </section>
-  </main>
-
-  <footer class="wrap site-footer">
-    <p>Dollar payments run on PayPal. Naira payments run on Tuago.</p>
-  </footer>
-
-  <dialog id="sponsor" aria-labelledby="sponsor-title">
-    <form class="dialog-body" id="sponsor-form" novalidate>
-      <h2 id="sponsor-title">Sponsor this farm</h2>
-      <p class="sub" id="sponsor-sub"></p>
-
-      <fieldset style="border:0;padding:0;margin:0">
-        <legend style="font-weight:600;font-size:var(--t-small);margin-bottom:.3rem;padding:0">How you will pay</legend>
-        <div class="rails">
-          <label><input type="radio" name="rail" value="paypal" checked> PayPal
-            <small>US dollars. Approve once; later parts are charged automatically.</small></label>
-          <label><input type="radio" name="rail" value="tuago"> Bank transfer
-            <small id="tuago-note">Naira, through Tuago. You pay each part when it is due.</small></label>
-        </div>
-      </fieldset>
-
-      <div class="field">
-        <label for="amount" id="amount-label">Total in US dollars</label>
-        <input type="number" id="amount" name="amount" inputmode="decimal" min="1" step="1" required>
-        <p class="hint" id="amount-hint"></p>
-      </div>
-
-      <div id="preview"></div>
-
-      <div class="field">
-        <label for="name">Your name</label>
-        <input type="text" id="name" name="name" autocomplete="name" maxlength="120" required>
-      </div>
-      <div class="field">
-        <label for="email">Email</label>
-        <input type="email" id="email" name="email" autocomplete="email" maxlength="160" required>
-        <p class="hint">So you can find this sponsorship again. Updates appear on your sponsorship page.</p>
-      </div>
-
-      <p class="error-text" id="sponsor-error" role="alert"></p>
-      <div class="dialog-actions">
-        <button class="button go" type="submit" id="sponsor-submit">Continue to PayPal</button>
-        <button class="button quiet" type="button" id="sponsor-close">Not now</button>
-      </div>
-    </form>
-  </dialog>
-
-  <script type="module" src="/assets/index.js"></script>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

@@ -24,6 +24,11 @@ async def create_farm(
         farmer_id=payload.farmer_id,
         location=payload.location,
         crop_type=payload.crop_type,
+        cover_image_url=payload.cover_image_url,
+        cover_image_alt=payload.cover_image_alt,
+        cover_image_credit=payload.cover_image_credit,
+        cover_image_source=payload.cover_image_source,
+        cover_image_license=payload.cover_image_license,
         total_plots=payload.total_plots,
         available_plots=payload.total_plots,
     )

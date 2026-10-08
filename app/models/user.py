@@ -32,6 +32,7 @@ class User(Base, TimestampMixin):
     phone: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
     # Sponsors who sign up on the web are identified by email; chat users have none.
     email: Mapped[str | None] = mapped_column(String(160), unique=True, index=True, nullable=True)
+    afribase_uid: Mapped[str | None] = mapped_column(String(100), unique=True, index=True, nullable=True)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="user_role"), nullable=False
     )

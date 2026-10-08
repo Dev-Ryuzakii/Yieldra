@@ -33,6 +33,8 @@ os.environ.update(
         "TELEGRAM_BOT_TOKEN": "xxx",
         "SECRET_KEY": "change-this-in-production",
         "PUBLIC_BASE_URL": "http://testserver",
+        "AFRIBASE_URL": "",
+        "AFRIBASE_ANON_KEY": "",
     }
 )
 

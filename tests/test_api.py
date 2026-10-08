@@ -45,7 +45,7 @@ async def test_sponsor_journey_over_http(client, world, sent, verifier):
     assert back.status_code == 303
     assert back.headers["location"] == f"/s/{started['sponsorship']['reference']}?paid=1"
     page = await client.get(back.headers["location"])
-    assert page.status_code == 200 and "Loading your sponsorship" in page.text
+    assert page.status_code == 200 and '<div id="root"></div>' in page.text
 
     detail = (await client.get(f"/sponsorships/{sponsorship_id}")).json()
     assert detail["status"] == "active" and detail["paid_minor"] == 2000
@@ -361,17 +361,17 @@ async def test_operator_sets_payout_account_and_bad_numbers_are_refused(client, 
 
 # -- pages and console -----------------------------------------------------
 async def test_pages_and_their_assets_are_served(client):
-    for path, marker in (
-        ("/", "Sponsor a farm. Pay as it grows."),
-        ("/s/ysp-anything", "Loading your sponsorship"),
-        ("/console", "Operator console"),
-        ("/assets/app.css", "--indigo"),
-        ("/assets/common.js", "export function strip"),
-    ):
+    import re
+
+    for path in ("/", "/s/ysp-anything", "/console"):
         resp = await client.get(path)
-        assert resp.status_code == 200 and marker in resp.text, path
-    grid = await client.get("/assets/vendor/ag-grid-community.min.js")
-    assert grid.status_code == 200 and "javascript" in grid.headers["content-type"]
+        assert resp.status_code == 200 and '<div id="root"></div>' in resp.text, path
+        if path != "/":
+            assert resp.headers["X-Robots-Tag"] == "noindex"
+    html = (await client.get("/")).text
+    for asset in re.findall(r'(?:src|href)="(/assets/[^"]+)"', html):
+        response = await client.get(asset)
+        assert response.status_code == 200, asset
 
 
 async def test_meta_reports_what_the_deployment_is_connected_to(client, live_setting):
@@ -393,6 +393,8 @@ async def test_farm_overview_and_ledger_follow_a_sponsorship(client, world, sent
         "id": world.farm.id, "name": "Adunni Cassava Plot", "crop_type": "cassava",
         "location": "Ogun", "farmer_first_name": "Adunni", "naira_ready": False,
         "sponsors": 0, "latest_stage": None, "latest_photo_url": None,
+        "cover_image_url": None, "cover_image_alt": None, "cover_image_credit": None,
+        "cover_image_source": None, "cover_image_license": None,
     }]
 
     started = await start(client, world)

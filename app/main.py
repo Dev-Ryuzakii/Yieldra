@@ -14,10 +14,12 @@ from app.redis_client import close_redis
 from app.telegram_poller import poll_forever
 from app.routers import (
     console,
+    auth,
     farms,
     health,
     investments,
     logistics,
+    media,
     offtake,
     pages,
     payouts,
@@ -74,11 +76,13 @@ app.include_router(reference.router)
 app.include_router(farms.router)
 app.include_router(investments.router)
 app.include_router(logistics.router)
+app.include_router(media.router)
 app.include_router(offtake.router)
 app.include_router(reports.router)
 app.include_router(sponsorships.router)
 app.include_router(payouts.router)
 app.include_router(console.router)
+app.include_router(auth.router)
 app.include_router(pages.router)
 app.include_router(webhooks.router)
 
@@ -86,5 +90,5 @@ app.include_router(webhooks.router)
 os.makedirs(os.path.join("generated", "contracts"), exist_ok=True)
 os.makedirs(os.path.join("generated", "evidence"), exist_ok=True)
 app.mount("/static", StaticFiles(directory="generated"), name="static")
-# Stylesheets and scripts for the web pages (see app/routers/pages.py).
-app.mount("/assets", StaticFiles(directory=os.path.join(pages.WEB_DIR, "assets")), name="assets")
+# Vite's compiled scripts, styles and bundled fonts.
+app.mount("/assets", StaticFiles(directory=os.path.join(pages.DIST_DIR, "assets"), check_dir=False), name="assets")

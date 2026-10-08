@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import delete
 
 from app.database import async_session_factory, engine
+from app.config import settings
 from app.models.farm import Farm, FarmPlot, FarmStatus, PlotStatus
 from app.models.harvest import ColdStorageBooking, Harvest, HarvestStatus
 from app.models.investment import Investment, InvestmentStatus
@@ -251,6 +252,8 @@ def _invest(session, investor: User, farm: Farm, amount_ngn: int, crop: str,
 
 
 async def main() -> None:
+    if "afribase.dev" in settings.database_url:
+        raise SystemExit("Demo seed is disabled for Afribase databases; it would replace real records")
     async with async_session_factory() as session:
         await _wipe(session)
         await _seed(session)

@@ -67,7 +67,7 @@ app/
     webhooks.py           Telegram, Tuago, PayPal
     deps.py               require_operator (X-Admin-Key)
   models/                 SQLAlchemy models; sponsorship.py and payout.py are the new ones
-  web/                    Static pages (no build step): index, track, console + assets/
+  web/                    React/TypeScript frontend (Vite, Tailwind CSS, Motion)
 migrations/versions/      Alembic; add a revision for every model change
 tests/                    pytest; SQLite by default, PostgreSQL with TEST_DATABASE_URL
 scripts/                  seed_db.py, check_llm.py
@@ -97,8 +97,7 @@ alembic revision --autogenerate -m "..."   # then review it by hand
   migration; autogenerate will not write it.
 - New behaviour gets a test. Payment tests assert the exact request sent to the
   provider and the state afterwards; see `tests/test_paypal.py`, `tests/test_tuago.py`.
-- The web pages insert API data as text, never as HTML (`h()` in
-  `app/web/assets/common.js`).
+- The React pages render API data as text, never as raw HTML.
 - Tuago has no API for sending money. Do not add code that assumes one.
 
 ## Known gaps

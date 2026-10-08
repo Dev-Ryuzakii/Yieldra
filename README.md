@@ -66,13 +66,56 @@ and where. The rate is `USD_NGN_RATE`. Farmers add their account by chat:
 
 | Address | For | What it does |
 |---|---|---|
-| `/` | Sponsors | Farms, how the money is split, and the form to start |
-| `/s/<reference>` | One sponsor | Their private page: stages, verified photos, updates, pay and stop buttons |
+| `/` | Everyone | Open farms, a licensed crop image gallery, and how sponsorship works; sign-in is required to check out |
+| `/s/<reference>` | Signed-in sponsor or operator | Stages, verified photos, updates, pay and stop buttons; the reference alone does not grant access |
+| `/auth` | All roles | Afribase email and password sign-in, registration and email confirmation |
+| `/dashboard` | Signed-in users | Role-scoped farms, sponsorships, investments, contracts or operator overview |
 | `/console` | Operators | AG Grid ledger of every tranche and farmer payout, review and retry actions, photo upload |
 | `/docs` | Developers | The JSON API |
 
-The pages are static files in `app/web/` served by the API, with no build step.
-AG Grid Community and the two typefaces are bundled, so nothing loads from a CDN.
+The pages are React and TypeScript components in `app/web/src/`, styled with Tailwind CSS
+and animated with Motion for React. AG Grid Community and the two typefaces are bundled,
+so nothing loads from a CDN. Build the frontend before running FastAPI locally:
+
+```sh
+cd app/web
+npm ci
+npm run build
+```
+
+For frontend development, run `npm run dev` alongside FastAPI on port 8000. Vite proxies
+API requests to FastAPI. The Docker image builds the frontend automatically.
+
+### Afribase accounts
+
+Set `AFRIBASE_URL` to the project root (for example `https://project.afribase.dev`),
+`AFRIBASE_ANON_KEY` to its public anon key, and `SECRET_KEY` to a long random value in
+`.env`. Do not put the Afribase service role key or JWT secret in the web app. Run
+`alembic upgrade head` before accepting sign-ins. When using Afribase's pooled
+Postgres URL, set it as `DATABASE_URL` in `.env`; keep the pooler password and
+service role key server-side.
+
+Afribase owns passwords and email confirmation. Yieldra stores an encrypted,
+HTTP-only session cookie and links the verified Afribase ID to a local user. New
+accounts start as sponsors. To give an existing farmer, investor, buyer or logistics
+user dashboard access, an operator assigns that user's verified email with
+`PUT /users/{id}/identity` and body `{ "email": "person@example.com" }` before the
+person signs in. Add verified operator emails to the comma-separated
+`OPERATOR_EMAILS` variable. Those accounts can open `/console`; the existing
+`X-Admin-Key` path remains available for API automation.
+For a hackathon operator account, put its email in `OPERATOR_EMAILS`, visit
+`/auth`, choose **Create account**, and register with that same email. Afribase
+may ask for email confirmation; after confirmation, sign in to reach the operator
+dashboard and console. No role can be chosen in the registration form.
+
+The public crop gallery is stored in the `crop_images` table, with licensed
+WebP images in the Afribase `farm-covers` Storage bucket. To refresh it after
+configuring `AFRIBASE_SERVICE_ROLE_KEY`, run
+`python scripts/publish_farm_covers.py` and then
+`python scripts/sync_crop_images.py`. Image credits and source links are shown
+on the page. These photos illustrate crops; they are not evidence from a
+particular farm. The hosted farm table starts empty until operators add real
+farms. `scripts/seed_db.py` is for disposable local databases only.
 
 ## PayPal integration
 
@@ -136,13 +179,22 @@ cp .env.example .env          # runs in mock mode until you add keys
 docker compose up -d db redis
 pip install -e ".[dev]"
 alembic upgrade head
-python scripts/seed_db.py
 uvicorn app.main:app --reload
 ```
 
 Open http://localhost:8000. Or run everything with `docker compose up`.
 
+Farm listings are empty until an operator adds verified farm records. The landing
+page's crop library comes from licensed images stored in Afribase Storage, with
+source and license metadata in the `crop_images` table. `scripts/seed_db.py` is
+only for disposable local databases; it refuses to run against Afribase because
+it replaces domain records.
+
 ### Walk through it in mock mode
+
+For a disposable local database, run `python scripts/seed_db.py` first. It
+replaces the local domain data with sample records and is never used for the
+Afribase-backed site.
 
 1. On `/`, choose a farm and sponsor it with PayPal. Mock mode skips PayPal's page
    and lands on your sponsorship page with the first part paid.
@@ -170,6 +222,36 @@ returns to their page, which re-checks open payments.
 ### Deploy
 
 `render.yaml` is a Render blueprint for the app and a PostgreSQL database.
+
+### Afribase Hosting
+
+The project can also run as one Afribase hosted app. In the Afribase project's
+**Apps** tab, connect the GitHub repository and select the branch to deploy.
+Afribase uses this repository's Dockerfile, which builds React, runs Alembic,
+then starts FastAPI on the platform's `PORT`. Its health check is `/health`.
+Afribase supplies `AFRIBASE_URL`, `AFRIBASE_ANON_KEY`, and `DATABASE_URL` to the
+app automatically. Do not copy `.env` or any service role or JWT secret into the
+image.
+
+Set these app environment variables in Afribase Hosting before the first deploy:
+
+| Variable | Value |
+|---|---|
+| `SECRET_KEY` | Unique long random secret; mark it secret |
+| `PUBLIC_BASE_URL` | The hosted app's HTTPS address |
+| `OPERATOR_EMAILS` | Comma-separated verified operator email addresses |
+
+`APP_ENV=production` is set in the Dockerfile. Add provider keys only when those
+integrations are ready, and point their redirect and webhook URLs at
+`PUBLIC_BASE_URL`. The app serves React and the API from the same origin, so
+browser requests use the app's own URL.
+
+Before accepting real farm evidence, attach an Afribase persistent disk mounted
+at `/app/generated`. Verified photos and contract PDFs currently live there;
+without a disk they disappear when the container is replaced. The public crop
+covers are already in Afribase Storage and do not need this disk. Scheduled
+Celery jobs also need a separate worker and Redis; the single hosted app serves
+the sponsorship website and API without those scheduled jobs.
 
 ## Tests
 
@@ -203,5 +285,5 @@ web pages and the test suite were added for *Build What's Next with PayPal and A
 ## License
 
 MIT — see [LICENSE](LICENSE). Bundled third-party files keep their own licenses:
-AG Grid Community (MIT, `app/web/assets/vendor/`) and the Bricolage Grotesque and
-Instrument Sans typefaces (SIL OFL 1.1, `app/web/assets/fonts/`).
+AG Grid Community (MIT, installed from npm) and the Bricolage Grotesque and
+Instrument Sans typefaces (SIL OFL 1.1, `app/web/public/assets/fonts/`).

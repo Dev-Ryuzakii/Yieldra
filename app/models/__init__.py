@@ -7,6 +7,7 @@ from app.models.harvest import (
     HarvestStatus,
 )
 from app.models.investment import Investment, InvestmentStatus
+from app.models.media import CropImage
 from app.models.offtake import ContractStatus, OfftakeContract
 from app.models.payout import DisbursementStatus, FarmerDisbursement, PayoutAccount
 from app.models.reference import ColdStorageFacility, CropParameter
@@ -34,6 +35,7 @@ __all__ = [
     "ContractStatus",
     "Investment",
     "InvestmentStatus",
+    "CropImage",
     "ColdStorageFacility",
     "CropParameter",
     "Sponsorship",

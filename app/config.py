@@ -94,6 +94,14 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8000"
     # Contact email Tuago shows on the checkouts Yieldra itself pays (farmer payouts).
     operator_email: str = "operator@example.com"
+    afribase_url: str = ""
+    afribase_anon_key: str = ""
+    # Comma-separated verified emails allowed into the operator console.
+    operator_emails: str = ""
+
+    @property
+    def afribase_ready(self) -> bool:
+        return bool(self.afribase_url.strip() and self.afribase_anon_key.strip())
 
     # Milestone verification thresholds (model confidence, 0-1).
     #   >= release  -> the tranche is charged automatically

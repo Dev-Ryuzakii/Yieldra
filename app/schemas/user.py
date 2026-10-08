@@ -20,6 +20,7 @@ class UserRead(BaseModel):
     id: int
     name: str
     phone: str
+    email: str | None
     role: UserRole
     language_preference: Language
     created_at: datetime

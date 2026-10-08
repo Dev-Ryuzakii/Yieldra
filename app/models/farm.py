@@ -31,6 +31,12 @@ class Farm(Base, TimestampMixin):
     farmer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     location: Mapped[str] = mapped_column(String(160), nullable=False)
     crop_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    # Editorial cover image only. Milestone evidence is stored separately and verified.
+    cover_image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cover_image_alt: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    cover_image_credit: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    cover_image_source: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cover_image_license: Mapped[str | None] = mapped_column(String(80), nullable=True)
     total_plots: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     available_plots: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     status: Mapped[FarmStatus] = mapped_column(

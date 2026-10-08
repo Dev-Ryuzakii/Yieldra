@@ -12,6 +12,11 @@ class FarmCreate(BaseModel):
     farmer_id: int
     location: str
     crop_type: str
+    cover_image_url: str | None = None
+    cover_image_alt: str | None = None
+    cover_image_credit: str | None = None
+    cover_image_source: str | None = None
+    cover_image_license: str | None = None
     total_plots: int = Field(ge=0)
 
 
@@ -23,6 +28,11 @@ class FarmRead(BaseModel):
     farmer_id: int
     location: str
     crop_type: str
+    cover_image_url: str | None
+    cover_image_alt: str | None
+    cover_image_credit: str | None
+    cover_image_source: str | None
+    cover_image_license: str | None
     total_plots: int
     available_plots: int
     status: FarmStatus

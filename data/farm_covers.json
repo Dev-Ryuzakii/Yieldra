@@ -1,0 +1,62 @@
+[
+  {
+    "crop": "cassava",
+    "url": "https://5ngayw2w45qg4tesjgyu.afribase.dev/storage/v1/object/public/farm-covers/cassava-illustrative.webp",
+    "alt": "Cassava plants growing in a field in Nigeria",
+    "credit": "Ghabzman",
+    "license": "CC BY 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Cassava_plantation_farm.jpg",
+    "changes": "Resized and converted to WebP",
+    "illustrative": true
+  },
+  {
+    "crop": "maize",
+    "url": "https://5ngayw2w45qg4tesjgyu.afribase.dev/storage/v1/object/public/farm-covers/maize-illustrative.webp",
+    "alt": "A Nigerian field with cassava and maize plants",
+    "credit": "Nubelbariloe",
+    "license": "CC BY 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Cassava_and_maize_farm.jpg",
+    "changes": "Resized and converted to WebP",
+    "illustrative": true
+  },
+  {
+    "crop": "tomatoes",
+    "url": "https://5ngayw2w45qg4tesjgyu.afribase.dev/storage/v1/object/public/farm-covers/tomatoes-illustrative.webp",
+    "alt": "Fresh tomatoes harvested in Nigeria",
+    "credit": "Eze kelechi",
+    "license": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:Fresh_Tomatoes_from_the_Nigeria_Soil_2.jpg",
+    "changes": "Resized and converted to WebP",
+    "illustrative": true
+  },
+  {
+    "crop": "rice",
+    "url": "https://5ngayw2w45qg4tesjgyu.afribase.dev/storage/v1/object/public/farm-covers/rice-illustrative.webp",
+    "alt": "Rice farming in Gombe State, Nigeria",
+    "credit": "MrUbash",
+    "license": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:Rice_farming_in_Nigeria.jpg",
+    "changes": "Resized and converted to WebP",
+    "illustrative": true
+  },
+  {
+    "crop": "groundnuts",
+    "url": "https://5ngayw2w45qg4tesjgyu.afribase.dev/storage/v1/object/public/farm-covers/groundnuts-illustrative.webp",
+    "alt": "Groundnuts growing on a Nigerian farm",
+    "credit": "Kingmoh1",
+    "license": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:Groundnuts_farm1.jpg",
+    "changes": "Resized and converted to WebP",
+    "illustrative": true
+  },
+  {
+    "crop": "peppers",
+    "url": "https://5ngayw2w45qg4tesjgyu.afribase.dev/storage/v1/object/public/farm-covers/peppers-illustrative.webp",
+    "alt": "Fresh peppers harvested from a farm in Nigeria",
+    "credit": "Nubelbariloe",
+    "license": "CC BY 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Picture_of_harvested_peper.jpg",
+    "changes": "Resized and converted to WebP",
+    "illustrative": true
+  }
+]

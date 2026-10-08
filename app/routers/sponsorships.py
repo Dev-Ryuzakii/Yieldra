@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from html import escape
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,7 +69,8 @@ async def _start(session: AsyncSession, sponsor_id: int, farm_id: int, total_min
 # -- starting --------------------------------------------------------------
 @router.post("", response_model=SponsorshipStarted, status_code=201)
 async def start_sponsorship(
-    payload: SponsorshipCreate, session: AsyncSession = Depends(get_session)
+    payload: SponsorshipCreate, session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_operator),
 ) -> dict:
     """Start a sponsorship for an existing user. Give total_usd (PayPal) or total_ngn (Tuago)."""
     if (payload.total_usd is None) == (payload.total_ngn is None):
@@ -83,18 +84,32 @@ async def start_sponsorship(
 
 @router.post("/checkout", response_model=SponsorshipStarted, status_code=201)
 async def sponsor_checkout(
-    payload: SponsorCheckout, session: AsyncSession = Depends(get_session)
+    payload: SponsorCheckout, request: Request, response: Response,
+    session: AsyncSession = Depends(get_session)
 ) -> dict:
-    """Start a sponsorship from the web. The sponsor is found or created by email."""
+    """Start a sponsorship from the web for the signed-in sponsor."""
     email = payload.email.strip().lower()
+    identity = None
+    if settings.afribase_ready or request.cookies.get("yieldra_session"):
+        from app.routers.auth import current_identity
+        identity = await current_identity(request, response)
+        if str(identity["email"]).lower() != email:
+            raise HTTPException(status_code=403, detail="Use your signed-in email to sponsor a farm")
     found = await session.execute(select(User).where(User.email == email))
     sponsor = found.scalars().first()
+    if sponsor is not None and sponsor.afribase_uid:
+        if identity is None:
+            from app.routers.auth import current_identity
+            identity = await current_identity(request, response)
+        if str(identity["id"]) != sponsor.afribase_uid or str(identity["email"]).lower() != email:
+            raise HTTPException(status_code=403, detail="Sign in with this email to sponsor a farm")
     if sponsor is None:
         sponsor = User(
             name=payload.name.strip(),
             # Web sponsors have no chat id; this placeholder keeps the column unique.
             phone=f"{WEB_PREFIX}{uuid.uuid4().hex[:16]}",
             email=email,
+            afribase_uid=str(identity["id"]) if identity else None,
             role=UserRole.sponsor,
         )
         session.add(sponsor)
@@ -142,6 +157,11 @@ async def farms_overview(session: AsyncSession = Depends(get_session)) -> list[d
                 "name": farm.name,
                 "crop_type": farm.crop_type,
                 "location": farm.location,
+                "cover_image_url": farm.cover_image_url,
+                "cover_image_alt": farm.cover_image_alt,
+                "cover_image_credit": farm.cover_image_credit,
+                "cover_image_source": farm.cover_image_source,
+                "cover_image_license": farm.cover_image_license,
                 "farmer_first_name": farmer.name.split()[0] if farmer else None,
                 "naira_ready": ready.first() is not None,
                 "sponsors": sponsors.scalar_one(),
@@ -162,7 +182,7 @@ async def list_sponsorships(
     return await agent.list_all(session, sponsor_id=sponsor_id, farm_id=farm_id)
 
 
-# -- the sponsor's own page (the reference is the secret) ------------------
+# -- the sponsor's own page -------------------------------------------------
 async def _by_reference(session: AsyncSession, reference: str) -> Sponsorship:
     sponsorship = await agent.by_reference(session, reference)
     if sponsorship is None:
@@ -170,29 +190,45 @@ async def _by_reference(session: AsyncSession, reference: str) -> Sponsorship:
     return sponsorship
 
 
+async def authorized_reference(session: AsyncSession, reference: str,
+                               request: Request, response: Response) -> Sponsorship:
+    sponsorship = await _by_reference(session, reference)
+    if not settings.afribase_ready:
+        return sponsorship
+    from app.routers.auth import _profile, current_identity
+    identity = await current_identity(request, response)
+    profile = await _profile(identity, session)
+    if profile["role"] != "operator" and sponsorship.sponsor_id != profile["id"]:
+        raise HTTPException(status_code=403, detail="This sponsorship belongs to another account")
+    return sponsorship
+
+
 @router.get("/ref/{reference}", response_model=SponsorshipRead)
 async def sponsorship_by_reference(
-    reference: str, session: AsyncSession = Depends(get_session)
+    reference: str, request: Request, response: Response,
+    session: AsyncSession = Depends(get_session)
 ) -> dict:
-    sponsorship = await _by_reference(session, reference)
+    sponsorship = await authorized_reference(session, reference, request, response)
     return await agent.get(session, sponsorship.id)
 
 
 @router.post("/ref/{reference}/refresh", response_model=SponsorshipRead)
 async def refresh_by_reference(
-    reference: str, session: AsyncSession = Depends(get_session)
+    reference: str, request: Request, response: Response,
+    session: AsyncSession = Depends(get_session)
 ) -> dict:
     """Re-check open naira payments with Tuago (used when the sponsor returns from paying)."""
-    sponsorship = await _by_reference(session, reference)
+    sponsorship = await authorized_reference(session, reference, request, response)
     return await agent.refresh(session, sponsorship)
 
 
 @router.post("/ref/{reference}/cancel", response_model=SponsorshipRead)
 async def cancel_by_reference(
-    reference: str, session: AsyncSession = Depends(get_session)
+    reference: str, request: Request, response: Response,
+    session: AsyncSession = Depends(get_session)
 ) -> dict:
     """The sponsor stops their own sponsorship. Paid tranches stay paid."""
-    sponsorship = await _by_reference(session, reference)
+    sponsorship = await authorized_reference(session, reference, request, response)
     _raise_for(await agent.cancel(session, sponsorship.id))
     return await agent.get(session, sponsorship.id)
 
