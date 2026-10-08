@@ -6,24 +6,27 @@ Amounts arrive in major units (dollars or naira) and are stored in minor units.
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SponsorshipCreate(BaseModel):
     """Start a sponsorship for an existing user (chat sponsors, scripts)."""
 
+    model_config = ConfigDict(extra="forbid")
+
     farm_id: int
     sponsor_id: int
     total_usd: float | None = Field(None, gt=0, description="Total in US dollars (PayPal)")
-    total_ngn: float | None = Field(None, gt=0, description="Total in naira (Tuago)")
 
 
 class SponsorCheckout(BaseModel):
     """Start a sponsorship from the web: the sponsor is identified by email."""
 
+    model_config = ConfigDict(extra="forbid")
+
     farm_id: int
-    amount: float = Field(gt=0, description="Total, in dollars for paypal or naira for tuago")
-    rail: Literal["paypal", "tuago"] = "paypal"
+    amount: float = Field(gt=0, description="Total in US dollars")
+    rail: Literal["paypal"] = "paypal"
     name: str = Field(min_length=1, max_length=120)
     email: str = Field(max_length=160, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -61,7 +64,7 @@ class MilestoneRead(BaseModel):
     sponsor_update: str | None
     verified_at: datetime | None
     paid_at: datetime | None
-    payment_url: str | None = Field(description="Tuago checkout to pay, when one is open")
+    payment_url: str | None = Field(description="Retired payment link; always null")
     paypal_order_id: str | None
     paypal_capture_id: str | None
     failure_reason: str | None

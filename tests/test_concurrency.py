@@ -11,8 +11,6 @@ from app.agents.sponsorship_agent import SponsorshipAgent
 from app.config import settings
 from app.database import async_session_factory
 from app.models.payout import FarmerDisbursement
-from app.services import naira_payments
-from app.tools import tuago
 
 pytestmark = pytest.mark.skipif(
     not settings.database_url.startswith("postgresql"),
@@ -36,20 +34,3 @@ async def test_paypal_return_and_webhook_together_capture_and_notify_once(sessio
     assert len([t for chat, t in sent if chat == world.sponsor.phone]) == 1
     async with async_session_factory() as check:
         assert len((await check.execute(select(FarmerDisbursement))).scalars().all()) == 1
-
-
-async def test_tuago_webhook_and_page_refresh_together_settle_once(session, world, banked, sent):
-    agent = SponsorshipAgent()
-    started = await agent.start(session, world.sponsor.id, world.farm.id, 10_000_000, rail="tuago")
-    await session.commit()
-    session_id = started["approve_url"].split("session=")[1]
-    await tuago.simulate_payment(session_id, "success")
-
-    async def settle():
-        async with async_session_factory() as own:
-            return (await naira_payments.settle(own, agent, session_id=session_id))["status"]
-
-    outcomes = sorted(await asyncio.gather(settle(), settle()))
-
-    assert outcomes == ["already_paid", "paid"]
-    assert len([t for chat, t in sent if chat == world.farmer.phone]) == 1

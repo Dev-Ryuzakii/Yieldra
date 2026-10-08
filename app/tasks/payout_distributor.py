@@ -3,7 +3,7 @@
 Runs daily at 09:00 WAT (see beat schedule). Finds sold harvests that still
 have active (unpaid) investments and a signed/paid offtake contract, then asks
 the Investment Agent to work out each investor's share pro-rata and queue it for a
-manual transfer (Tuago, the naira rail, has no payout API). Payouts above ₦100,000
+manual transfer. Payouts above ₦100,000
 are held for investor Telegram approval (handled inside the agent).
 """
 

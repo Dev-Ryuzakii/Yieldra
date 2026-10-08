@@ -61,15 +61,6 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # Tuago (naira leg: naira sponsors pay in, farmers are paid out by split settlement).
-    # The key decides the environment: sk_test_... is Tuago's sandbox, sk_live_... is real.
-    tuago_secret_key: str = "xxx"
-    tuago_webhook_secret: str = "xxx"
-    tuago_base_url: str = "https://api.gettuago.com"
-    # Yieldra's cut of each naira collection, in basis points (0 = farmer gets it all,
-    # less Tuago's own fee).
-    tuago_platform_fee_bps: int = 0
-
     # PayPal (international leg: sponsor payments). PAYPAL_ENV is "sandbox" or "live".
     paypal_client_id: str = "xxx"
     paypal_client_secret: str = "xxx"
@@ -92,8 +83,6 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000"
     # Public address of this API. PayPal sends the sponsor back here after approval.
     public_base_url: str = "http://localhost:8000"
-    # Contact email Tuago shows on the checkouts Yieldra itself pays (farmer payouts).
-    operator_email: str = "operator@example.com"
     afribase_url: str = ""
     afribase_anon_key: str = ""
     # Comma-separated verified emails allowed into the operator console.
@@ -176,16 +165,6 @@ class Settings(BaseSettings):
         return not self._is_placeholder(self.resolved_llm_api_key)
 
     # -- Payments / channels -------------------------------------------------
-    @property
-    def tuago_live(self) -> bool:
-        """True once a real Tuago secret key is configured (test or live)."""
-        return self.tuago_secret_key.startswith(("sk_test_", "sk_live_"))
-
-    @property
-    def tuago_test_mode(self) -> bool:
-        """True in mock mode or with a Tuago sandbox key: payments can be simulated."""
-        return not self.tuago_secret_key.startswith("sk_live_")
-
     @property
     def paypal_live(self) -> bool:
         """True once real PayPal REST credentials are configured (sandbox or live)."""

@@ -1,7 +1,7 @@
 [project]
 name = "yieldra"
 version = "1.0.0"
-description = "AI-powered fractional farm investment and autonomous supply chain platform for Africa"
+description = "PayPal farm sponsorship with verified milestones and farmer payout tracking"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

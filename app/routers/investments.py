@@ -16,21 +16,9 @@ _agent = InvestmentAgent()
 @router.post("")
 async def create_investment(
     payload: InvestmentCreate,
-    session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Process an investment: verify payment -> create records -> Telegram confirm."""
-    result = await _agent.process_investment(
-        session,
-        investor_id=payload.investor_id,
-        farm_id=payload.farm_id,
-        amount_ngn=payload.amount_ngn,
-        payment_reference=payload.payment_reference,
-    )
-    if result.get("status") == "error":
-        raise HTTPException(status_code=404, detail=result["message"])
-    if result.get("status") == "payment_failed":
-        raise HTTPException(status_code=402, detail="payment verification failed")
-    return result
+    """Naira investment payments are unavailable while the payment rail is retired."""
+    raise HTTPException(status_code=410, detail="Investment payments are unavailable. Sponsorship payments use PayPal.")
 
 
 @router.get("/returns/estimate")

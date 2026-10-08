@@ -1,4 +1,4 @@
-"""Sponsorship endpoints — milestone-released farm sponsorship over PayPal or Tuago."""
+"""Sponsorship endpoints — milestone-released farm sponsorship over PayPal."""
 
 from __future__ import annotations
 
@@ -32,11 +32,9 @@ from app.schemas.sponsorship import (
     SponsorshipRead,
     SponsorshipStarted,
 )
-from app.services import evidence_store, naira_payments
+from app.services import evidence_store
 from app.services.notify import WEB_PREFIX
-from app.tools import tuago
 from app.tools.paypal import PayPalError
-from app.tools.tuago import TuagoError
 
 router = APIRouter(prefix="/sponsorships", tags=["sponsorships"])
 agent = SponsorshipAgent()
@@ -60,8 +58,6 @@ async def _start(session: AsyncSession, sponsor_id: int, farm_id: int, total_min
         )
     except PayPalError as exc:
         raise HTTPException(status_code=502, detail=f"PayPal: {exc.issue or exc}") from exc
-    except TuagoError as exc:
-        raise HTTPException(status_code=502, detail=f"Tuago: {exc.code}") from exc
     _raise_for(result)
     return result
 
@@ -72,14 +68,10 @@ async def start_sponsorship(
     payload: SponsorshipCreate, session: AsyncSession = Depends(get_session),
     _: None = Depends(require_operator),
 ) -> dict:
-    """Start a sponsorship for an existing user. Give total_usd (PayPal) or total_ngn (Tuago)."""
-    if (payload.total_usd is None) == (payload.total_ngn is None):
-        raise HTTPException(status_code=422, detail="give exactly one of total_usd or total_ngn")
-    if payload.total_usd is not None:
-        rail, total = Rail.paypal.value, payload.total_usd
-    else:
-        rail, total = Rail.tuago.value, payload.total_ngn
-    return await _start(session, payload.sponsor_id, payload.farm_id, int(round(total * 100)), rail)
+    """Start a PayPal sponsorship for an existing user."""
+    if payload.total_usd is None:
+        raise HTTPException(status_code=422, detail="give total_usd")
+    return await _start(session, payload.sponsor_id, payload.farm_id, int(round(payload.total_usd * 100)), Rail.paypal.value)
 
 
 @router.post("/checkout", response_model=SponsorshipStarted, status_code=201)
@@ -217,9 +209,9 @@ async def refresh_by_reference(
     reference: str, request: Request, response: Response,
     session: AsyncSession = Depends(get_session)
 ) -> dict:
-    """Re-check open naira payments with Tuago (used when the sponsor returns from paying)."""
+    """Reload the current sponsorship state."""
     sponsorship = await authorized_reference(session, reference, request, response)
-    return await agent.refresh(session, sponsorship)
+    return await agent.get(session, sponsorship.id)
 
 
 @router.post("/ref/{reference}/cancel", response_model=SponsorshipRead)
@@ -326,23 +318,6 @@ async def retry_payment(
     result = await agent.retry_payment(session, milestone_id)
     _raise_for(result)
     return result
-
-
-@router.post("/milestones/{milestone_id}/simulate-payment")
-async def simulate_naira_payment(
-    milestone_id: int,
-    session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_operator),
-) -> dict:
-    """Sandbox only: mark a naira tranche's Tuago checkout as paid, then confirm it."""
-    milestone = await session.get(SponsorshipMilestone, milestone_id)
-    if milestone is None or not milestone.tuago_session_id:
-        raise HTTPException(status_code=404, detail="no open Tuago checkout for this milestone")
-    try:
-        await tuago.simulate_payment(milestone.tuago_session_id, "success")
-    except TuagoError as exc:
-        raise HTTPException(status_code=409, detail=f"Tuago: {exc.code}") from exc
-    return await naira_payments.settle(session, agent, session_id=milestone.tuago_session_id)
 
 
 def _page(title: str, body: str) -> str:

@@ -1,13 +1,7 @@
-"""Naira payout models — how a farmer actually receives money.
+"""Farmer payout obligations and historical bank account records.
 
-``PayoutAccount`` is the farmer's bank account, registered with Tuago as a
-subaccount so collections routed through it settle to that bank.
-
-``FarmerDisbursement`` is the naira owed to a farmer for one PayPal-funded tranche.
-Tuago cannot send money, so Yieldra pays it *in* through a Tuago checkout routed to
-the farmer's subaccount; Tuago verifies the transfer and settles it to the farmer.
-Naira-sponsored tranches need no disbursement: the sponsor's own payment is already
-routed through the farmer's subaccount.
+A PayPal capture creates a pending obligation; settlement is not automated.
+Legacy payment provider columns remain so older rows can be read.
 """
 
 import enum
@@ -21,10 +15,11 @@ from app.models.base import TimestampMixin
 
 
 class DisbursementStatus(str, enum.Enum):
+    pending_manual = "pending_manual"            # owed; no automated settlement rail configured
     needs_bank_details = "needs_bank_details"  # farmer has not added a bank account yet
-    awaiting_funding = "awaiting_funding"      # Tuago account issued; Yieldra must transfer
-    paid = "paid"                              # Tuago confirmed the transfer
-    failed = "failed"                          # the Tuago payment failed or expired
+    awaiting_funding = "awaiting_funding"      # historical funding record
+    paid = "paid"                              # historical completed payout
+    failed = "failed"                          # historical failed payout
 
 
 class PayoutAccount(Base, TimestampMixin):

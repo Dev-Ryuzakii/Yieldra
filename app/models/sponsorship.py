@@ -1,16 +1,7 @@
-"""Sponsorship models — a sponsor funds a farm in tranches released on verified milestones.
+"""Sponsorships and milestones, with PayPal as the active payment rail.
 
-A ``Sponsorship`` is paid on one of two rails:
-
-  * PayPal (USD): the first tranche is captured when the sponsor approves, which also
-    saves their PayPal account; each later tranche is charged to that saved account.
-  * Tuago (NGN): every tranche is a Tuago checkout the sponsor pays by bank transfer,
-    routed through the farmer's subaccount so the farmer's share settles to their bank.
-
-On both rails a tranche after the first is only collected once the farmer's photo
-for the matching ``SponsorshipMilestone`` passes verification.
-
-Money is stored as integers in minor units of ``currency`` (US cents, or kobo).
+Older naira rail values remain in the schema so historical records are readable.
+Money is stored as integers in minor units of its currency.
 """
 
 import enum
@@ -44,15 +35,15 @@ class MilestoneStatus(str, enum.Enum):
     awaiting_evidence = "awaiting_evidence"  # farmer should send a photo
     needs_review = "needs_review"            # verification unsure; a person decides
     payment_failed = "payment_failed"        # verified, but the PayPal charge failed
-    awaiting_payment = "awaiting_payment"    # verified; naira sponsor has been sent a link
+    awaiting_payment = "awaiting_payment"    # historical naira payment awaiting settlement
     paid = "paid"                            # verified and charged
 
 
 class Rail(str, enum.Enum):
-    """How the sponsor pays. Decides the currency and how later tranches are collected."""
+    """Active PayPal rail and a historical naira value kept for old rows."""
 
     paypal = "paypal"  # USD; later tranches are charged to the saved PayPal account
-    tuago = "tuago"    # NGN; each tranche is a Tuago checkout the sponsor pays
+    tuago = "tuago"    # historical data only
 
 
 class Sponsorship(Base, TimestampMixin):
@@ -127,7 +118,7 @@ class SponsorshipMilestone(Base, TimestampMixin):
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Payment for this tranche.
-    # Tuago rail: the open checkout the sponsor must pay.
+    # Historical naira checkout fields; no new checkout can be opened.
     tuago_session_id: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
     payment_reference: Mapped[str | None] = mapped_column(String(80), index=True, nullable=True)
     payment_url: Mapped[str | None] = mapped_column(String(500), nullable=True)

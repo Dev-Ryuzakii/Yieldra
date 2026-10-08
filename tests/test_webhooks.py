@@ -1,22 +1,15 @@
-"""Provider webhooks: Tuago (HMAC-signed) and PayPal (verified with PayPal)."""
+"""PayPal webhooks are verified before changing sponsorship state."""
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
 
 from app.main import app
-from app.models.payout import FarmerDisbursement
-from app.models.sponsorship import SponsorshipMilestone
-from app.tools import paypal, tuago
-
-SECRET = "whsec_test"
+from app.tools import paypal
 
 
 @pytest_asyncio.fixture
@@ -26,105 +19,8 @@ async def client():
         yield c
 
 
-def signed(event: dict) -> tuple[bytes, dict]:
-    body = json.dumps(event).encode()
-    signature = hmac.new(SECRET.encode(), body, hashlib.sha512).hexdigest()
-    return body, {"X-Ollie-Signature": signature, "Content-Type": "application/json"}
-
-
-async def start_naira(client, world) -> dict:
-    resp = await client.post(
-        "/sponsorships",
-        json={"sponsor_id": world.sponsor.id, "farm_id": world.farm.id, "total_ngn": 100_000},
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()
-
-
-# -- Tuago -----------------------------------------------------------------
-async def test_tuago_charge_success_activates_the_naira_sponsorship(
-    client, world, banked, sent, live_setting, session
-):
-    live_setting(tuago_webhook_secret=SECRET)
-    started = await start_naira(client, world)
-    milestone = (await session.execute(
-        select(SponsorshipMilestone).where(SponsorshipMilestone.tuago_session_id.is_not(None))
-    )).scalars().one()
-    await tuago.simulate_payment(milestone.tuago_session_id, "success")
-
-    body, headers = signed({"type": "charge.success", "data": {
-        "reference": milestone.payment_reference, "amount_minor": 2_000_000,
-    }})
-    resp = await client.post("/webhook/tuago", content=body, headers=headers)
-
-    assert resp.status_code == 200
-    assert resp.json()["result"] == {
-        "kind": "tranche", "milestone_id": milestone.id, "status": "paid",
-        "sponsorship_id": started["sponsorship"]["id"],
-    }
-    detail = (await client.get(f"/sponsorships/ref/{started['sponsorship']['reference']}")).json()
-    assert detail["status"] == "active" and detail["paid"] == "₦20,000.00"
-
-
-async def test_tuago_webhook_cannot_mark_an_unpaid_checkout_paid(
-    client, world, banked, live_setting, session
-):
-    """A correctly signed notice is still checked against Tuago before money is recorded."""
-    live_setting(tuago_webhook_secret=SECRET)
-    started = await start_naira(client, world)
-    milestone = (await session.execute(
-        select(SponsorshipMilestone).where(SponsorshipMilestone.tuago_session_id.is_not(None))
-    )).scalars().one()
-
-    body, headers = signed({"type": "charge.success", "data": {
-        "reference": milestone.payment_reference,
-    }})
-    resp = await client.post("/webhook/tuago", content=body, headers=headers)
-
-    assert resp.json()["result"]["status"] == "pending"
-    detail = (await client.get(f"/sponsorships/ref/{started['sponsorship']['reference']}")).json()
-    assert detail["status"] == "pending_approval" and detail["paid_minor"] == 0
-
-
-@pytest.mark.parametrize("signature", [None, "deadbeef"])
-async def test_tuago_webhook_rejects_a_bad_signature(client, live_setting, signature):
-    live_setting(tuago_webhook_secret=SECRET)
-    headers = {"X-Ollie-Signature": signature} if signature else {}
-    resp = await client.post("/webhook/tuago", content=b'{"type":"charge.success"}', headers=headers)
-    assert resp.status_code == 401
-
-
-async def test_tuago_webhook_is_closed_until_a_secret_is_set(client):
-    body, headers = signed({"type": "charge.success", "data": {"reference": "x"}})
-    assert (await client.post("/webhook/tuago", content=body, headers=headers)).status_code == 401
-
-
-async def test_tuago_webhook_settles_a_farmer_disbursement(
-    client, world, banked, sent, live_setting, session
-):
-    live_setting(tuago_webhook_secret=SECRET)
-    started = (await client.post(
-        "/sponsorships",
-        json={"sponsor_id": world.sponsor.id, "farm_id": world.farm.id, "total_usd": 100},
-    )).json()
-    await client.get(started["approve_url"].replace("http://testserver", ""))
-    payout = (await session.execute(select(FarmerDisbursement))).scalars().one()
-    await tuago.simulate_payment(payout.tuago_session_id, "success")
-
-    body, headers = signed({"type": "charge.success", "data": {
-        "checkout_session_id": payout.tuago_session_id,
-    }})
-    resp = await client.post("/webhook/tuago", content=body, headers=headers)
-
-    assert resp.json()["result"]["kind"] == "disbursement"
-    assert resp.json()["result"]["status"] == "paid"
-
-
-async def test_tuago_non_charge_events_are_acknowledged_and_ignored(client, live_setting):
-    live_setting(tuago_webhook_secret=SECRET)
-    body, headers = signed({"type": "settlement.success", "data": {}})
-    resp = await client.post("/webhook/tuago", content=body, headers=headers)
-    assert resp.status_code == 200 and resp.json()["status"] == "ignored"
+async def test_retired_tuago_webhook_is_not_registered(client):
+    assert (await client.post("/webhook/tuago", json={"type": "charge.success"})).status_code == 404
 
 
 # -- PayPal ----------------------------------------------------------------

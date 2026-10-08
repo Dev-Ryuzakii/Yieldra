@@ -26,10 +26,10 @@ export async function api<T>(path: string, options: { method?: string; body?: un
   }
   return data as T;
 }
-export type Rail = 'paypal' | 'tuago';
+export type Rail = 'paypal';
 export type Currency = 'USD' | 'NGN';
 export interface Meta {
-  paypal: string; tuago: string; model_ready: boolean; auth_ready: boolean; operator_key_required: boolean;
+  paypal: string; farmer_payouts: string; model_ready: boolean; auth_ready: boolean; operator_key_required: boolean;
   usd_ngn_rate: number; limits: Record<Rail, { currency: Currency; min: number; max: number }>;
 }
 export interface AccountSession { authenticated: boolean; profile?: { name: string; email: string; role: string } }
@@ -61,10 +61,10 @@ export function useMeta() {
 }
 export function ModeNotice({ meta }: { meta: Meta | null }) {
   if (!meta) return null;
-  const mock = [meta.paypal === 'mock' && 'PayPal', meta.tuago === 'mock' && 'Tuago'].filter(Boolean);
   const notes: string[] = [];
-  if (mock.length) notes.push(`Demo mode: ${mock.join(' and ')} payments are simulated here, so no money moves.`);
-  else if (meta.paypal === 'sandbox' || meta.tuago === 'test') notes.push('Test mode: payments run in the PayPal sandbox and Tuago test mode, so no real money moves.');
+  if (meta.paypal === 'mock') notes.push('Demo mode: PayPal payments are simulated, so no money moves.');
+  else if (meta.paypal === 'sandbox') notes.push('Test mode: PayPal payments run in the sandbox, so no real money moves.');
+  if (meta.farmer_payouts === 'pending_manual') notes.push('Farmer payouts are recorded as pending while a settlement method is being set up.');
   if (!meta.model_ready) notes.push('No model key is set, so farm photos cannot be checked yet.');
   return notes.length ? <p className="notice" role="status">{notes.join(' ')}</p> : null;
 }

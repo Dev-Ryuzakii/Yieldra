@@ -48,7 +48,7 @@ import app.models  # noqa: E402,F401  (registers every table)
 from app.models.farm import Farm, FarmStatus  # noqa: E402
 from app.models.user import Language, User, UserRole  # noqa: E402
 from app.services import evidence_store  # noqa: E402
-from app.tools import paypal, tuago  # noqa: E402
+from app.tools import paypal  # noqa: E402
 
 # A 1x1 PNG, used wherever a test needs "a photo".
 PNG_1PX = (
@@ -71,7 +71,6 @@ async def _clean_state(monkeypatch, tmp_path):
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     paypal.reset_state()
-    tuago.reset_state()
     BaseAgent.reset_clients()
     # Farm photos go to a throwaway folder, never into the repository.
     monkeypatch.setattr(evidence_store, "_ROOT", str(tmp_path / "generated"))
@@ -114,17 +113,6 @@ def sent(monkeypatch):
     monkeypatch.setattr("app.services.notify.send_text_message", fake_send)
     monkeypatch.setattr("app.routers.webhooks.send_text_message", fake_send)
     return messages
-
-
-@pytest_asyncio.fixture
-async def banked(session, world):
-    """Give the farmer a verified payout account (needed for naira sponsorships)."""
-    from app.services import payouts
-
-    result = await payouts.register_account(session, world.farmer, "058", "0123456789")
-    await session.commit()
-    assert result["status"] == "saved"
-    return result
 
 
 @pytest.fixture

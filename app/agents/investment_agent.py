@@ -1,7 +1,6 @@
-"""Investment Agent — naira farm funding, share records, return distribution.
+"""Investment Agent — historical share records and return distribution.
 
-Naira payments are collected and verified through Tuago. Tuago has no API for sending
-money, so investor returns are calculated and queued here for a manual transfer.
+New naira investment creation is paused after retirement of its payment rail.
 
 Model: settings.model_investment (complex financial reasoning).
 Human-in-the-loop: payouts above ₦100,000 pause for investor Telegram approval.
@@ -10,7 +9,6 @@ Re-confirmation: investments above ₦500,000 require explicit investor confirma
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -18,11 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent
 from app.config import settings
-from app.models.farm import Farm, FarmPlot, FarmStatus, PlotStatus
+from app.models.farm import Farm
 from app.models.investment import Investment, InvestmentStatus
 from app.models.user import User
 from app.services.reference import crop_return_multiplier
-from app.tools import tuago
 from app.tools.telegram import send_text_message
 from app.utils.logger import get_logger
 from app.utils.money import format_naira, naira_to_kobo
@@ -30,12 +27,11 @@ from app.utils.money import format_naira, naira_to_kobo
 log = get_logger("yieldra.agent.investment")
 
 # Human-in-the-loop thresholds (kobo).
-RECONFIRM_THRESHOLD = naira_to_kobo(500_000)
 PAYOUT_APPROVAL_THRESHOLD = naira_to_kobo(100_000)
 
 SYSTEM_PROMPT = (
     "You are Yieldra's Investment Agent. You manage farm investment transactions on "
-    "behalf of investors. You can create investment records, verify Tuago payments, "
+    "behalf of investors. You can report on existing investment records, "
     "tokenize farm plot shares, and send Telegram confirmations. Always confirm investment "
     "amounts before creating records. Investments above ₦500,000 require explicit investor "
     "re-confirmation. Respond in the investor's preferred language."
@@ -48,89 +44,11 @@ class InvestmentAgent(BaseAgent):
 
     # -- core operations ---------------------------------------------------
     async def process_investment(
-        self,
-        session: AsyncSession,
-        investor_id: int,
-        farm_id: int,
-        amount_ngn: int,
-        payment_reference: str,
+        self, session: AsyncSession, investor_id: int, farm_id: int,
+        amount_ngn: int, payment_reference: str,
     ) -> dict[str, Any]:
-        """Verify payment, create Investment + FarmPlot records, confirm via Telegram.
-
-        ``amount_ngn`` is given in Naira; stored as kobo.
-        """
-        amount_kobo = naira_to_kobo(amount_ngn)
-
-        farm = await session.get(Farm, farm_id)
-        investor = await session.get(User, investor_id)
-        if farm is None or investor is None:
-            return {"status": "error", "message": "farm or investor not found"}
-
-        # Verify the naira payment with Tuago.
-        try:
-            verification = await tuago.verify_charge(payment_reference)
-        except tuago.TuagoError as exc:
-            return {"status": "payment_failed", "verification": {"code": exc.code}}
-        if not tuago.is_paid(verification.get("status")):
-            return {"status": "payment_failed", "verification": verification}
-        if not verification.get("mock") and verification.get("amount_minor") != amount_kobo:
-            # Paid, but not the amount this investment claims.
-            return {"status": "payment_failed", "verification": verification}
-
-        # Human-in-the-loop: large investments need re-confirmation.
-        requires_confirmation = amount_kobo > RECONFIRM_THRESHOLD
-
-        multiplier = await crop_return_multiplier(session, farm.crop_type)
-        expected_return = int(round(amount_kobo * multiplier))
-        share_pct = self._share_percentage(farm, amount_kobo)
-
-        investment = Investment(
-            farm_id=farm_id,
-            investor_id=investor_id,
-            amount_ngn=amount_kobo,
-            shares=Decimal(str(round(share_pct, 3))),
-            expected_return_ngn=expected_return,
-            actual_return_ngn=0,
-            payment_reference=payment_reference,
-            status=InvestmentStatus.active,
-        )
-        session.add(investment)
-
-        plot = FarmPlot(
-            farm_id=farm_id,
-            investor_id=investor_id,
-            share_percentage=Decimal(str(round(share_pct, 3))),
-            amount_invested=amount_kobo,
-            status=PlotStatus.owned,
-        )
-        session.add(plot)
-
-        # Update farm availability/status.
-        if farm.available_plots > 0:
-            farm.available_plots -= 1
-        if farm.available_plots == 0 and farm.status == FarmStatus.listed:
-            farm.status = FarmStatus.funded
-
-        await session.flush()
-
-        await send_text_message(
-            investor.phone,
-            f"Yieldra: Investment of {format_naira(amount_kobo)} in {farm.name} confirmed. "
-            f"You hold {share_pct:.2f}% — est. return {format_naira(expected_return)}.",
-        )
-
-        log.info(
-            "investment created id=%s farm=%s amount=%s share=%.3f%%",
-            investment.id, farm_id, amount_kobo, share_pct,
-        )
-        return {
-            "status": "confirmed",
-            "investment_id": investment.id,
-            "amount_kobo": amount_kobo,
-            "share_percentage": round(share_pct, 3),
-            "expected_return_kobo": expected_return,
-            "requires_confirmation": requires_confirmation,
-        }
+        """The retired naira collection rail cannot verify a new investment."""
+        return {"status": "payment_failed", "message": "Investment payments are unavailable"}
 
     async def calculate_expected_returns(
         self, session: AsyncSession, farm_id: int, investment_amount_ngn: int

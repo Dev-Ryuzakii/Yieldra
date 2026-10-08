@@ -76,7 +76,7 @@ async def test_confirm_pays_first_tranche_and_saves_payment_method(agent, sessio
     to_sponsor = [text for chat, text in sent if chat == world.sponsor.phone]
     # The farmer is told in naira ($20 at the test rate of 1,500) and how to get paid.
     assert "PROOF" in to_farmer[0] and "₦30,000.00" in to_farmer[0]
-    assert "BANK <bank code> <account number>" in to_farmer[0]
+    assert "farmer payout is pending" in to_farmer[0]
     assert "$20.00" in to_sponsor[0] and "$100.00" in to_sponsor[0]
     assert s["track_url"] in to_sponsor[0]
 

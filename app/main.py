@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Yieldra",
-    description="Sponsor a farm and pay as it grows: PayPal and Tuago payments released on AI-verified farm milestones.",
+    description="Sponsor a farm and pay as it grows: PayPal payments linked to verified farm milestones.",
     version=__version__,
     lifespan=lifespan,
 )
