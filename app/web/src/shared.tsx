@@ -65,7 +65,6 @@ export function ModeNotice({ meta }: { meta: Meta | null }) {
   if (meta.paypal === 'mock') notes.push('Demo mode: PayPal payments are simulated, so no money moves.');
   else if (meta.paypal === 'sandbox') notes.push('Test mode: PayPal payments run in the sandbox, so no real money moves.');
   if (meta.farmer_payouts === 'pending_manual') notes.push('Farmer payouts are recorded as pending while a settlement method is being set up.');
-  if (!meta.model_ready) notes.push('No model key is set, so farm photos cannot be checked yet.');
   return notes.length ? <p className="notice" role="status">{notes.join(' ')}</p> : null;
 }
 const STORE = 'yieldra.sponsorships';
