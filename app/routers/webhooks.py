@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.advisory_agent import AdvisoryAgent
 from app.agents.logistics_agent import LogisticsAgent
 from app.agents.report_agent import ReportAgent
+from app.agents.sponsor_chat_agent import SponsorChatAgent, farms_text, open_farms
 from app.agents.sponsorship_agent import SponsorshipAgent
 from app.config import settings
 from app.database import get_session
@@ -37,6 +38,11 @@ _advisory = AdvisoryAgent()
 _logistics = LogisticsAgent()
 _report = ReportAgent()
 _sponsorship = SponsorshipAgent()
+_sponsor_chat = SponsorChatAgent()
+
+# Without a model, a sponsor asking about these gets the list of open farms;
+# anything else gets the status of their own sponsorships.
+_FARM_WORDS = {"farm", "farms", "list", "plot", "plots", "price", "prices", "cost", "crop", "crops", "open"}
 
 # Keywords that indicate a logistics update rather than an advisory question.
 _LOGISTICS_KEYWORDS = {"ready", "harvest", "truck", "pickup", "storage", "deliver", "delivered"}
@@ -200,8 +206,20 @@ async def _route(
 
     if user.role == UserRole.sponsor:
         summary = await _sponsorship.status_text(session, user.id)
-        await send_text_message(user.phone, summary)
-        return {"agent": "sponsorship", "content": summary}
+        if settings.llm_live and text.strip():
+            try:
+                reply = await _sponsor_chat.reply(
+                    session, [{"role": "user", "content": text[:1000]}],
+                    extra_context={"my_sponsorships": summary},
+                )
+                await send_text_message(user.phone, reply.strip())
+                return {"agent": "sponsor_chat", "content": reply}
+            except Exception:  # noqa: BLE001 — fall back to the plain answers below
+                log.exception("sponsor chat failed; replying without the model")
+        tokens = {t.strip(".,!?").lower() for t in text.split()}
+        reply = farms_text(await open_farms(session)) if tokens & _FARM_WORDS else summary
+        await send_text_message(user.phone, reply)
+        return {"agent": "sponsorship", "content": reply}
 
     if user.role == UserRole.buyer:
         await send_text_message(

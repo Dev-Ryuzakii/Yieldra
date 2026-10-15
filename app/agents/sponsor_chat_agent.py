@@ -44,17 +44,42 @@ class SponsorChatAgent(BaseAgent):
     def __init__(self) -> None:
         super().__init__(model=settings.model_advisory, system_prompt=SYSTEM_PROMPT)
 
-    async def reply(self, session: AsyncSession, messages: list[dict]) -> str:
-        farms = list((await session.execute(select(Farm).order_by(Farm.id))).scalars())
-        listed = []
-        for farm in farms:
-            farmer = await session.get(User, farm.farmer_id)
-            listed.append({
-                "name": farm.name,
-                "crop": farm.crop_type,
-                "location": f"{farm.location}, Nigeria",
-                "farmer_first_name": farmer.name.split()[0] if farmer else None,
-                "plots_left": farm.available_plots,
-                "price_per_plot_usd": plot_price_usd(farm.crop_type),
-            })
-        return await self.run(messages=messages, context={"open_farms": listed})
+    async def reply(
+        self, session: AsyncSession, messages: list[dict], extra_context: dict | None = None
+    ) -> str:
+        context = {"open_farms": await open_farms(session), **(extra_context or {})}
+        return await self.run(messages=messages, context=context)
+
+
+async def open_farms(session: AsyncSession) -> list[dict]:
+    """Farms with their plots left and price per plot, as the assistant sees them."""
+    farms = list((await session.execute(select(Farm).order_by(Farm.id))).scalars())
+    listed = []
+    for farm in farms:
+        farmer = await session.get(User, farm.farmer_id)
+        listed.append({
+            "name": farm.name,
+            "crop": farm.crop_type,
+            "location": f"{farm.location}, Nigeria",
+            "farmer_first_name": farmer.name.split()[0] if farmer else None,
+            "plots_left": farm.available_plots,
+            "price_per_plot_usd": plot_price_usd(farm.crop_type),
+        })
+    return listed
+
+
+def farms_text(farms: list[dict]) -> str:
+    """The open farms as a chat message, for when no model is available."""
+    open_ = [farm for farm in farms if farm["plots_left"] > 0]
+    if not open_:
+        return "Yieldra: No farms are open for sponsorship right now. Check back soon."
+    lines = [
+        f"- {farm['name']} ({farm['crop']}, {farm['location']}): ${farm['price_per_plot_usd']} "
+        f"per plot, {farm['plots_left']} plot(s) left"
+        for farm in open_
+    ]
+    site = settings.public_base_url.rstrip("/")
+    return (
+        "Yieldra: Farms you can sponsor:\n" + "\n".join(lines)
+        + f"\n\nTo sponsor, open {site}/#farms and press 'Sponsor this farm'."
+    )

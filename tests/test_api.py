@@ -403,3 +403,34 @@ async def test_chat_is_rate_limited(client, world, monkeypatch):
     codes = [(await client.post("/chat", json=body)).status_code for _ in range(chat._LIMIT + 1)]
 
     assert codes[:-1] == [200] * chat._LIMIT and codes[-1] == 429
+
+
+async def test_telegram_sponsor_can_ask_for_open_farms_without_a_model(client, world, sent):
+    await client.post("/webhook/telegram", json={"chat": "8080", "text": "sponsor"})
+
+    await client.post("/webhook/telegram", json={"chat": "8080", "text": "list farm i can sponsor"})
+    assert "Adunni Cassava Plot (cassava, Ogun, Nigeria): $40 per plot, 10 plot(s) left" in sent[-1][1]
+
+    await client.post("/webhook/telegram", json={"chat": "8080", "text": "how am I doing?"})
+    assert sent[-1][1] == "Yieldra: You have no active farm sponsorships yet."
+
+
+async def test_telegram_sponsor_questions_go_to_the_assistant(client, world, sent, monkeypatch):
+    from app.config import settings
+    from app.routers import webhooks
+
+    seen = {}
+
+    async def fake_run(messages, context=None):
+        seen.update(context=context)
+        return "Adunni's cassava farm has 10 plots at $40."
+
+    monkeypatch.setattr(type(settings), "llm_live", property(lambda self: True))
+    monkeypatch.setattr(webhooks._sponsor_chat, "run", fake_run)
+    await client.post("/webhook/telegram", json={"chat": "8181", "text": "sponsor"})
+
+    await client.post("/webhook/telegram", json={"chat": "8181", "text": "which farm should I back?"})
+
+    assert sent[-1][1] == "Adunni's cassava farm has 10 plots at $40."
+    assert seen["context"]["my_sponsorships"] == "Yieldra: You have no active farm sponsorships yet."
+    assert seen["context"]["open_farms"][0]["plots_left"] == 10
