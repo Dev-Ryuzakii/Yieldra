@@ -434,3 +434,18 @@ async def test_telegram_sponsor_questions_go_to_the_assistant(client, world, sen
     assert sent[-1][1] == "Adunni's cassava farm has 10 plots at $40."
     assert seen["context"]["my_sponsorships"] == "Yieldra: You have no active farm sponsorships yet."
     assert seen["context"]["open_farms"][0]["plots_left"] == 10
+
+
+async def test_demo_farms_are_added_only_to_an_empty_database(session, world):
+    from sqlalchemy import func, select
+
+    from app.models.farm import Farm
+    from app.services import demo_farms
+
+    assert await demo_farms.add_if_empty(session) == 0  # the world farm is already there
+    await session.delete(world.farm)
+    await session.flush()
+
+    assert await demo_farms.add_if_empty(session) == 3
+    assert await demo_farms.add_missing(session) == 0
+    assert (await session.execute(select(func.count(Farm.id)))).scalar_one() == 3

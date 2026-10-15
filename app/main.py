@@ -35,9 +35,26 @@ from app.utils.logger import get_logger
 log = get_logger("yieldra.main")
 
 
+async def _add_demo_farms() -> None:
+    """Give a fresh database farms to sponsor. Never blocks startup."""
+    from app.database import async_session_factory
+    from app.services.demo_farms import add_if_empty
+
+    try:
+        async with async_session_factory() as session:
+            added = await add_if_empty(session)
+            await session.commit()
+        if added:
+            log.info("added %s demo farm(s) to an empty database", added)
+    except Exception:  # noqa: BLE001 — the app must still start
+        log.exception("could not add demo farms")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Yieldra starting (env=%s, version=%s)", settings.app_env, __version__)
+    if settings.demo_farms:
+        await _add_demo_farms()
 
     poller_task: asyncio.Task | None = None
     if settings.telegram_use_polling and settings.telegram_live:

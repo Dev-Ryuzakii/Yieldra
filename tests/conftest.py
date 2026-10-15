@@ -31,6 +31,7 @@ os.environ.update(
         "TUAGO_PLATFORM_FEE_BPS": "0",
         "USD_NGN_RATE": "1500",
         "TELEGRAM_BOT_TOKEN": "xxx",
+        "DEMO_FARMS": "false",
         "SECRET_KEY": "change-this-in-production",
         "PUBLIC_BASE_URL": "http://testserver",
         "AFRIBASE_URL": "",
