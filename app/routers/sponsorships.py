@@ -14,6 +14,7 @@ from app.agents.sponsorship_agent import SponsorshipAgent
 from app.config import settings
 from app.database import get_session
 from app.models.farm import Farm
+from app.models.media import CropImage
 from app.models.payout import PayoutAccount
 from app.models.sponsorship import (
     MilestoneStatus,
@@ -34,6 +35,7 @@ from app.schemas.sponsorship import (
 )
 from app.services import evidence_store
 from app.services.notify import WEB_PREFIX
+from app.services.plots import plot_price_minor, plot_price_usd
 from app.tools.paypal import PayPalError
 
 router = APIRouter(prefix="/sponsorships", tags=["sponsorships"])
@@ -51,10 +53,12 @@ def _raise_for(result: dict) -> None:
         raise HTTPException(status_code=404 if "not found" in message else 409, detail=message)
 
 
-async def _start(session: AsyncSession, sponsor_id: int, farm_id: int, total_minor: int, rail: str) -> dict:
+async def _start(session: AsyncSession, sponsor_id: int, farm_id: int, total_minor: int, rail: str,
+                 plots: int | None = None) -> dict:
     try:
         result = await agent.start(
-            session, sponsor_id=sponsor_id, farm_id=farm_id, total_minor=total_minor, rail=rail
+            session, sponsor_id=sponsor_id, farm_id=farm_id, total_minor=total_minor, rail=rail,
+            plots=plots,
         )
     except PayPalError as exc:
         raise HTTPException(status_code=502, detail=f"PayPal: {exc.issue or exc}") from exc
@@ -80,6 +84,15 @@ async def sponsor_checkout(
     session: AsyncSession = Depends(get_session)
 ) -> dict:
     """Start a sponsorship from the web for the signed-in sponsor."""
+    if payload.plots is not None:
+        farm = await session.get(Farm, payload.farm_id)
+        if farm is None:
+            raise HTTPException(status_code=404, detail="farm not found")
+        if payload.plots > farm.available_plots:
+            raise HTTPException(status_code=409, detail=f"Only {farm.available_plots} plot(s) of this farm are still open")
+        total_minor = payload.plots * plot_price_minor(farm.crop_type)
+    else:
+        total_minor = int(round(payload.amount * 100))
     email = payload.email.strip().lower()
     identity = None
     if settings.afribase_ready or request.cookies.get("yieldra_session"):
@@ -106,9 +119,7 @@ async def sponsor_checkout(
         )
         session.add(sponsor)
         await session.flush()
-    return await _start(
-        session, sponsor.id, payload.farm_id, int(round(payload.amount * 100)), payload.rail
-    )
+    return await _start(session, sponsor.id, payload.farm_id, total_minor, payload.rail, payload.plots)
 
 
 # -- public reads ----------------------------------------------------------
@@ -116,9 +127,12 @@ async def sponsor_checkout(
 async def farms_overview(session: AsyncSession = Depends(get_session)) -> list[dict]:
     """Farms open to sponsors, with how far each has come."""
     farms = list((await session.execute(select(Farm).order_by(Farm.id))).scalars())
+    # A farm without its own cover shows the licensed photo of its crop instead.
+    crop_images = {image.crop: image for image in (await session.execute(select(CropImage))).scalars()}
     out: list[dict] = []
     for farm in farms:
         farmer = await session.get(User, farm.farmer_id)
+        fallback = None if farm.cover_image_url else crop_images.get(farm.crop_type)
         ready = await session.execute(
             select(PayoutAccount.id).where(PayoutAccount.user_id == farm.farmer_id)
         )
@@ -149,11 +163,14 @@ async def farms_overview(session: AsyncSession = Depends(get_session)) -> list[d
                 "name": farm.name,
                 "crop_type": farm.crop_type,
                 "location": farm.location,
-                "cover_image_url": farm.cover_image_url,
-                "cover_image_alt": farm.cover_image_alt,
-                "cover_image_credit": farm.cover_image_credit,
-                "cover_image_source": farm.cover_image_source,
-                "cover_image_license": farm.cover_image_license,
+                "total_plots": farm.total_plots,
+                "available_plots": farm.available_plots,
+                "plot_price_usd": plot_price_usd(farm.crop_type),
+                "cover_image_url": fallback.image_url if fallback else farm.cover_image_url,
+                "cover_image_alt": fallback.alt if fallback else farm.cover_image_alt,
+                "cover_image_credit": fallback.credit if fallback else farm.cover_image_credit,
+                "cover_image_source": fallback.source_url if fallback else farm.cover_image_source,
+                "cover_image_license": fallback.license if fallback else farm.cover_image_license,
                 "farmer_first_name": farmer.name.split()[0] if farmer else None,
                 "naira_ready": ready.first() is not None,
                 "sponsors": sponsors.scalar_one(),

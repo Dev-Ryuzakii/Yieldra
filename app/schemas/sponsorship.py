@@ -6,7 +6,7 @@ Amounts arrive in major units (dollars or naira) and are stored in minor units.
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SponsorshipCreate(BaseModel):
@@ -25,10 +25,17 @@ class SponsorCheckout(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     farm_id: int
-    amount: float = Field(gt=0, description="Total in US dollars")
+    plots: int | None = Field(None, ge=1, le=1000, description="Plots to back; the server prices them")
+    amount: float | None = Field(None, gt=0, description="Total in US dollars, when no plots are given")
     rail: Literal["paypal"] = "paypal"
     name: str = Field(min_length=1, max_length=120)
     email: str = Field(max_length=160, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+    @model_validator(mode="after")
+    def _plots_or_amount(self) -> "SponsorCheckout":
+        if self.plots is None and self.amount is None:
+            raise ValueError("give plots or amount")
+        return self
 
 
 class EvidenceSubmit(BaseModel):
@@ -84,6 +91,7 @@ class SponsorshipRead(BaseModel):
     sponsor_id: int
     currency: str
     total_minor: int = Field(description="Total in minor units")
+    plots: int | None = None
     total: str
     paid_minor: int
     paid: str

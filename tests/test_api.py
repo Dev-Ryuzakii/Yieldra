@@ -316,6 +316,7 @@ async def test_farm_overview_and_ledger_follow_a_sponsorship(client, world, sent
     before = (await client.get("/sponsorships/farms/overview")).json()
     assert before == [{
         "id": world.farm.id, "name": "Adunni Cassava Plot", "crop_type": "cassava",
+        "total_plots": 10, "available_plots": 10, "plot_price_usd": 40,
         "location": "Ogun", "farmer_first_name": "Adunni", "naira_ready": False,
         "sponsors": 0, "latest_stage": None, "latest_photo_url": None,
         "cover_image_url": None, "cover_image_alt": None, "cover_image_credit": None,
@@ -340,3 +341,65 @@ async def test_farm_overview_and_ledger_follow_a_sponsorship(client, world, sent
     assert planted["confidence"] == pytest.approx(0.92)
     assert planted["payout_status"] == "pending_manual" and planted["payout_naira"] == 45_000.0
     assert planted["farmer_has_bank"] is False
+
+
+# -- plots and the website chat ----------------------------------------------
+async def test_plots_price_the_sponsorship_and_are_taken_once_paid(client, world, session):
+    farms = (await client.get("/sponsorships/farms/overview")).json()
+    assert farms[0]["plot_price_usd"] == 40 and farms[0]["available_plots"] == 10
+
+    started = await checkout(client, world, amount=None, plots=3)
+
+    assert started.status_code == 201
+    body = started.json()["sponsorship"]
+    assert body["total"] == "$120.00" and body["plots"] == 3
+    await session.refresh(world.farm)
+    assert world.farm.available_plots == 10  # nothing is taken before PayPal capture
+    await client.get(path_of(started.json()["approve_url"]))
+    await session.refresh(world.farm)
+    assert world.farm.available_plots == 7
+
+
+async def test_cannot_sponsor_more_plots_than_are_open(client, world):
+    too_many = await checkout(client, world, amount=None, plots=11)
+    assert too_many.status_code == 409 and "10 plot" in too_many.json()["detail"]
+    assert (await checkout(client, world, amount=None, plots=None)).status_code == 422
+
+
+async def test_chat_answers_with_the_open_farms_in_context(client, world, monkeypatch):
+    from app.config import settings
+    from app.routers import chat
+
+    seen = {}
+
+    async def fake_run(messages, context=None):
+        seen.update(messages=messages, context=context)
+        return " A cassava plot is $40. "
+
+    monkeypatch.setattr(type(settings), "llm_live", property(lambda self: True))
+    monkeypatch.setattr(chat._agent, "run", fake_run)
+    monkeypatch.setattr(chat, "_recent", chat.defaultdict(chat.deque))
+
+    reply = await client.post("/chat", json={"messages": [{"role": "user", "content": "How much is a plot?"}]})
+
+    assert reply.status_code == 200 and reply.json() == {"reply": "A cassava plot is $40."}
+    farm = seen["context"]["open_farms"][0]
+    assert farm["name"] == "Adunni Cassava Plot" and farm["price_per_plot_usd"] == 40 and farm["plots_left"] == 10
+    assert (await client.post("/chat", json={"messages": [{"role": "assistant", "content": "hi"}]})).status_code == 422
+
+
+async def test_chat_is_rate_limited(client, world, monkeypatch):
+    from app.config import settings
+    from app.routers import chat
+
+    async def fake_run(messages, context=None):
+        return "ok"
+
+    monkeypatch.setattr(type(settings), "llm_live", property(lambda self: True))
+    monkeypatch.setattr(chat._agent, "run", fake_run)
+    monkeypatch.setattr(chat, "_recent", chat.defaultdict(chat.deque))
+    body = {"messages": [{"role": "user", "content": "hello"}]}
+
+    codes = [(await client.post("/chat", json=body)).status_code for _ in range(chat._LIMIT + 1)]
+
+    assert codes[:-1] == [200] * chat._LIMIT and codes[-1] == 429

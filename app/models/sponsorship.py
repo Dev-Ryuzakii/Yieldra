@@ -71,6 +71,8 @@ class Sponsorship(Base, TimestampMixin):
     # PayPal payment token for the sponsor's saved account. It authorises charges, so
     # it is never returned by the API; encrypt this column before running in production.
     paypal_vault_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Plots of the farm this sponsorship backs; null for amount-only sponsorships.
+    plots: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     farm: Mapped["Farm"] = relationship()
     sponsor: Mapped["User"] = relationship()

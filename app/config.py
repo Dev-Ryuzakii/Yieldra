@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     telegram_bot_token: str = "xxx"
     telegram_use_polling: bool = True
     telegram_webhook_secret: str = "yieldra_webhook_verify"
+    # Public @username of the bot, so the website can link to it. Optional.
+    telegram_bot_username: str = ""
 
     # App
     app_env: str = "development"

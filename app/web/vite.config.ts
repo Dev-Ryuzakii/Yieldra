@@ -9,6 +9,9 @@ export default defineConfig({
   server: {
     proxy: {
       '/meta': 'http://localhost:8000',
+      '/account': 'http://localhost:8000',
+      '/chat': 'http://localhost:8000',
+      '/media': 'http://localhost:8000',
       '/sponsorships': 'http://localhost:8000',
       '/console/ledger': 'http://localhost:8000',
       '/disbursements': 'http://localhost:8000',

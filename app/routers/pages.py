@@ -110,6 +110,10 @@ async def meta() -> dict:
         "paypal": _mode(settings.paypal_live, settings.paypal_env),
         "farmer_payouts": "pending_manual",
         "model_ready": settings.llm_live,
+        "telegram_url": (
+            f"https://t.me/{settings.telegram_bot_username.lstrip('@')}"
+            if settings.telegram_bot_username.strip() else None
+        ),
         "auth_ready": settings.afribase_ready,
         "operator_key_required": not (
             settings.is_development and settings._is_placeholder(settings.secret_key)

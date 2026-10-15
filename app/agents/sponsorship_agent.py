@@ -72,6 +72,7 @@ class SponsorshipAgent(BaseAgent):
         farm_id: int,
         total_minor: int,
         rail: str = Rail.paypal.value,
+        plots: int | None = None,
     ) -> dict[str, Any]:
         """Create a sponsorship and the payment for its first tranche."""
         try:
@@ -88,6 +89,8 @@ class SponsorshipAgent(BaseAgent):
         farm = await session.get(Farm, farm_id)
         if sponsor is None or farm is None:
             return {"status": "error", "message": "sponsor or farm not found"}
+        if plots is not None and plots > farm.available_plots:
+            return {"status": "error", "message": f"only {farm.available_plots} plot(s) of this farm are still open"}
         lowest, highest = limits_for(currency)
         if not lowest <= total_minor <= highest:
             return {
@@ -108,6 +111,7 @@ class SponsorshipAgent(BaseAgent):
             currency=currency,
             rail=chosen.value,
             status=SponsorshipStatus.pending_approval,
+            plots=plots,
         )
         session.add(sponsorship)
         await session.flush()
@@ -206,6 +210,9 @@ class SponsorshipAgent(BaseAgent):
         first.paid_at = _now()
         sponsorship.paypal_vault_id = capture.get("vault_id")
         sponsorship.status = SponsorshipStatus.active
+        if sponsorship.plots and farm is not None:
+            # The plots are taken once the sponsor has paid, not when checkout starts.
+            farm.available_plots = max(0, farm.available_plots - sponsorship.plots)
         nxt = milestones[1] if len(milestones) > 1 else None
         if nxt is not None:
             nxt.status = MilestoneStatus.awaiting_evidence
@@ -592,6 +599,7 @@ class SponsorshipAgent(BaseAgent):
             "sponsor_id": sponsorship.sponsor_id,
             "currency": currency,
             "total_minor": sponsorship.total_minor,
+            "plots": sponsorship.plots,
             "total": format_money(sponsorship.total_minor, currency),
             "paid_minor": sum(m.amount_minor for m in paid),
             "paid": format_money(sum(m.amount_minor for m in paid), currency),

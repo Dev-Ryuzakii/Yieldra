@@ -30,7 +30,7 @@ export type Rail = 'paypal';
 export type Currency = 'USD' | 'NGN';
 export interface Meta {
   paypal: string; farmer_payouts: string; model_ready: boolean; auth_ready: boolean; operator_key_required: boolean;
-  usd_ngn_rate: number; limits: Record<Rail, { currency: Currency; min: number; max: number }>;
+  usd_ngn_rate: number; telegram_url: string | null; limits: Record<Rail, { currency: Currency; min: number; max: number }>;
 }
 export interface AccountSession { authenticated: boolean; profile?: { name: string; email: string; role: string } }
 export const STATE_TEXT: Record<string, string> = {
