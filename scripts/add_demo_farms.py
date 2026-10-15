@@ -3,7 +3,7 @@
 Unlike ``seed_db.py`` this never deletes anything: it inserts each farmer and
 farm only if a row with the same phone or farm name is not already there, so it
 is safe to run against the hosted database more than once. The app also does
-this by itself at startup when the farms table is empty (DEMO_FARMS=true).
+this by itself at startup unless DEMO_FARMS=false.
 
     DATABASE_URL=postgresql+asyncpg://... python scripts/add_demo_farms.py
 """

@@ -36,16 +36,16 @@ log = get_logger("yieldra.main")
 
 
 async def _add_demo_farms() -> None:
-    """Give a fresh database farms to sponsor. Never blocks startup."""
+    """Make sure the demo farms exist. Never blocks startup."""
     from app.database import async_session_factory
-    from app.services.demo_farms import add_if_empty
+    from app.services.demo_farms import add_missing
 
     try:
         async with async_session_factory() as session:
-            added = await add_if_empty(session)
+            added = await add_missing(session)
             await session.commit()
         if added:
-            log.info("added %s demo farm(s) to an empty database", added)
+            log.info("added %s missing demo farm(s)", added)
     except Exception:  # noqa: BLE001 — the app must still start
         log.exception("could not add demo farms")
 

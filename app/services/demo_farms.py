@@ -1,12 +1,12 @@
-"""The three demo farms and their farmers, added without deleting anything.
+"""The demo farms and their farmers, added without deleting anything.
 
-The app calls ``add_if_empty`` at startup so a fresh hosted database has farms
-to sponsor; ``scripts/add_demo_farms.py`` calls ``add_missing`` by hand.
+The app calls ``add_missing`` at startup (unless DEMO_FARMS=false) so a hosted
+database has farms to sponsor; ``scripts/add_demo_farms.py`` does the same by hand.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.farm import Farm, FarmStatus
@@ -19,6 +19,24 @@ FARMS = [
      "Musa Maize Field", "Benue", "maize", 8),
     ("Grace Eze", "+2348030000003", Language.english,
      "Grace Tomato Garden", "Kano", "tomatoes", 12),
+    ("Chinedu Okeke", "+2348030000004", Language.english,
+     "Okeke Rice Paddy", "Ebonyi", "rice", 15),
+    ("Halima Sani", "+2348030000005", Language.hausa,
+     "Halima Groundnut Farm", "Kano", "groundnuts", 10),
+    ("Bisi Adeyemi", "+2348030000006", Language.yoruba,
+     "Bisi Pepper Rows", "Oyo", "peppers", 6),
+    ("Ibrahim Yusuf", "+2348030000007", Language.hausa,
+     "Yusuf Maize Acres", "Kaduna", "maize", 20),
+    ("Ngozi Eze", "+2348030000008", Language.english,
+     "Ngozi Cassava Garden", "Enugu", "cassava", 12),
+    ("Tunde Bello", "+2348030000009", Language.yoruba,
+     "Bello Tomato Greenhouse", "Plateau", "tomatoes", 8),
+    ("Amina Garba", "+2348030000010", Language.hausa,
+     "Garba Rice Fields", "Niger", "rice", 18),
+    ("Emeka Nwankwo", "+2348030000011", Language.english,
+     "Nwankwo Pepper Farm", "Anambra", "peppers", 9),
+    ("Fatima Abubakar", "+2348030000012", Language.hausa,
+     "Fatima Groundnut Plots", "Bauchi", "groundnuts", 14),
 ]
 
 
@@ -40,9 +58,3 @@ async def add_missing(session: AsyncSession) -> int:
     await session.flush()
     return added
 
-
-async def add_if_empty(session: AsyncSession) -> int:
-    """Add the demo farms only when the database has no farms at all."""
-    if (await session.execute(select(func.count(Farm.id)))).scalar_one():
-        return 0
-    return await add_missing(session)

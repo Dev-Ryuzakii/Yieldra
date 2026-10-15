@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str = "yieldra_webhook_verify"
     # Public @username of the bot, so the website can link to it. Optional.
     telegram_bot_username: str = ""
-    # Add the demo farms at startup when the database has no farms yet.
+    # Add any missing demo farms at startup (never deletes or changes existing farms).
     demo_farms: bool = True
 
     # App

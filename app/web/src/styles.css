@@ -192,17 +192,6 @@ input[type="file"] { width: 100%; font-size: .86rem; }
 .meta-label { display: block; color: var(--muted); font-size: .73rem; margin-bottom: .25rem; }
 .farm-meta strong { display: block; font-size: .86rem; line-height: 1.25; }
 .farm-action { width: 100%; justify-content: space-between; }
-.crop-library { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #d5e2d1; }
-.crop-library-head { display: flex; justify-content: space-between; align-items: end; gap: 1.5rem; margin-bottom: 1.2rem; }
-.crop-library-head h3 { font-size: clamp(1.6rem, 2.7vw, 2.4rem); }
-.crop-library-head > p { max-width: 35ch; color: var(--muted); font-size: .85rem; }
-.crop-gallery { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1rem; }
-.crop-gallery figure { margin: 0; overflow: hidden; border-radius: 16px; background: white; border: 1px solid #dce7d9; }
-.crop-gallery img { width: 100%; height: clamp(12rem,17vw,16rem); object-fit: cover; }
-.crop-gallery figcaption { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .4rem 1rem; padding: .8rem 1rem; }
-.crop-gallery figcaption strong { font: 750 1.1rem var(--display); }
-.crop-gallery figcaption a { color: var(--muted); font-size: .68rem; text-decoration: none; }
-.crop-gallery figcaption a:hover { text-decoration: underline; }
 .yours-section { background: white; }
 .mine { list-style: none; display: flex; flex-wrap: wrap; gap: .75rem; padding: 0; margin: 0; }
 .mine .button { min-width: 15rem; justify-content: space-between; }
@@ -321,8 +310,6 @@ dialog::backdrop { background: rgba(7,29,17,.62); backdrop-filter: blur(5px); }
   .strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .strip > li { min-height: 9.5rem; }
   .farm-media { height: 13rem; }
-  .crop-gallery { grid-template-columns: repeat(2, minmax(0,1fr)); }
-  .crop-library-head { align-items: start; flex-direction: column; }
   .answers { grid-template-columns: 1fr; }
   .stage-row { grid-template-columns: 2.4rem minmax(0, 1fr); }
   .stage-row figure { grid-column: 2; }
@@ -332,7 +319,6 @@ dialog::backdrop { background: rgba(7,29,17,.62); backdrop-filter: blur(5px); }
   .site-nav a:nth-child(2) { display: none; }
   .farms { grid-template-columns: 1fr; }
   .farm-media { height: 15rem; }
-  .crop-gallery { grid-template-columns: 1fr; }
   .rails { grid-template-columns: 1fr; }
   .dialog-body .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .footer-inner { flex-direction: column; }
@@ -412,13 +398,6 @@ dialog::backdrop { background: rgba(7,29,17,.62); backdrop-filter: blur(5px); }
 .total-line span { font-size: .86rem; font-weight: 650; color: var(--ink); }
 .total-line strong { font: 800 1.6rem/1 var(--display); color: var(--forest); margin-left: auto; }
 .total-line small { flex-basis: 100%; text-align: right; color: var(--muted); font-size: .78rem; }
-.crop-pick { position: relative; display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
-.crop-pick img { display: block; transition: transform .35s ease; }
-.crop-pick:hover img, .crop-pick:focus-visible img { transform: scale(1.03); }
-.crop-pick:focus-visible { outline: 3px solid #ecae42; outline-offset: -3px; }
-.crop-pick-label { position: absolute; left: .8rem; bottom: .8rem; padding: .45rem .8rem; border-radius: 999px; background: rgba(14,44,34,.82); color: white; font-size: .8rem; font-weight: 700; opacity: 0; transform: translateY(6px); transition: opacity .2s ease, transform .2s ease; }
-.crop-pick:hover .crop-pick-label, .crop-pick:focus-visible .crop-pick-label { opacity: 1; transform: none; }
-@media (hover: none) { .crop-pick-label { opacity: 1; transform: none; } }
 
 /* Chat */
 .chat-launcher { position: fixed; right: 1.2rem; bottom: 1.2rem; z-index: 40; display: inline-flex; align-items: center; gap: .5rem; min-width: 3.4rem; height: 3.4rem; padding: 0 1.2rem; border: 0; border-radius: 999px; background: var(--forest); color: white; font: 750 .95rem var(--body); cursor: pointer; box-shadow: 0 14px 34px rgba(14,44,34,.28); transition: transform .2s ease, background .2s ease; }

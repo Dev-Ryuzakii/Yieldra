@@ -436,16 +436,15 @@ async def test_telegram_sponsor_questions_go_to_the_assistant(client, world, sen
     assert seen["context"]["open_farms"][0]["plots_left"] == 10
 
 
-async def test_demo_farms_are_added_only_to_an_empty_database(session, world):
+async def test_demo_farms_are_added_once_and_leave_existing_farms_alone(session, world):
     from sqlalchemy import func, select
 
     from app.models.farm import Farm
     from app.services import demo_farms
 
-    assert await demo_farms.add_if_empty(session) == 0  # the world farm is already there
-    await session.delete(world.farm)
-    await session.flush()
+    world.farm.available_plots = 4  # the existing farm with the same name keeps its state
 
-    assert await demo_farms.add_if_empty(session) == 3
+    assert await demo_farms.add_missing(session) == len(demo_farms.FARMS) - 1
     assert await demo_farms.add_missing(session) == 0
-    assert (await session.execute(select(func.count(Farm.id)))).scalar_one() == 3
+    assert (await session.execute(select(func.count(Farm.id)))).scalar_one() == 12
+    assert world.farm.available_plots == 4

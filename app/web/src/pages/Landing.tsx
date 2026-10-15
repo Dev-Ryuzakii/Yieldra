@@ -5,7 +5,6 @@ import { api, ApiError, capital, Header, message, ModeNotice, money, remember, S
 
 interface Farm { id: number; name: string; crop_type: string; location: string; farmer_first_name: string; cover_image_url: string | null; cover_image_alt: string | null; cover_image_credit: string | null; cover_image_source: string | null; cover_image_license: string | null; latest_stage: string | null; sponsors: number; naira_ready: boolean; total_plots: number; available_plots: number; plot_price_usd: number }
 interface Checkout { approve_url: string; sponsorship: { reference: string; farm_name: string; total: string } }
-interface CropCover { crop: string; url: string; alt: string; credit: string; source: string; license: string; changes: string; illustrative: boolean }
 const RAILS: Record<Rail, { currency: Currency; label: string; button: string }> = {
   paypal: { currency: 'USD', label: 'Total in US dollars', button: 'Continue to PayPal' },
 };
@@ -15,12 +14,10 @@ export function Landing() {
   const meta = useMeta();
   const reduced = useReducedMotion();
   const [farms, setFarms] = useState<Farm[] | null>(null);
-  const [cropCovers, setCropCovers] = useState<CropCover[]>([]);
   const [farmError, setFarmError] = useState('');
   const [farm, setFarm] = useState<Farm | null>(null);
   const rail: Rail = 'paypal';
   const [plots, setPlots] = useState('1');
-  const [cropNotice, setCropNotice] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [signedInEmail, setSignedInEmail] = useState('');
@@ -36,18 +33,11 @@ export function Landing() {
   const config = RAILS[rail];
   const bounds = limits[rail];
   useEffect(() => { api<Farm[]>('/sponsorships/farms/overview').then(setFarms).catch(err => setFarmError(message(err))); }, []);
-  useEffect(() => { api<CropCover[]>('/media/covers').then(setCropCovers).catch(() => {}); }, []);
   useEffect(() => { api<AccountSession>('/account/session').then(result => { setAccount(result); if (result.authenticated && result.profile) { setName(result.profile.name); setEmail(result.profile.email); setSignedInEmail(result.profile.email); } }).catch(err => setAccountError(message(err))); }, []);
   function openSponsor(selected: Farm) {
     if (account === null) return;
     if (!account.authenticated) { window.location.assign('/signin?next=%2F%23farms'); return; }
-    setFarm(selected); setPlots('1'); setError(''); setCropNotice(''); dialog.current?.showModal();
-  }
-  function pickCrop(crop: string) {
-    const open = (farms || []).filter(item => item.crop_type === crop && item.available_plots > 0).sort((a, b) => b.available_plots - a.available_plots);
-    if (open.length) { openSponsor(open[0]); return; }
-    setCropNotice(`No ${crop} farm is open for sponsorship right now. Try another crop, or ask the assistant.`);
-    document.getElementById('farms')?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth' });
+    setFarm(selected); setPlots('1'); setError(''); dialog.current?.showModal();
   }
   const plotCount = Number(plots);
   const plotsValid = farm !== null && Number.isInteger(plotCount) && plotCount >= 1 && plotCount <= farm.available_plots;
@@ -92,13 +82,12 @@ export function Landing() {
       </div>
     </div></section>
     <section className="band farms-section" id="farms"><div className="wrap"><div className="section-heading"><div><p className="eyebrow">Farms you can support</p><h2>Meet the farms.</h2></div><p>Choose a farm, make your contribution, and follow its progress all the way to harvest.</p></div>
-      {cropNotice && <p className="notice" role="status">{cropNotice}</p>}
       {accountError && <p className="notice" role="alert">Account status could not be checked. {accountError} <button className="text-link" type="button" onClick={() => window.location.reload()}>Retry</button></p>}
       <ul className="farms" aria-live="polite">{farmError ? <li className="empty">Farms could not be loaded. {farmError}</li> : farms === null ? <li className="empty">Loading farms…</li> : farms.length === 0 ? <li className="empty">No farms are open for sponsorship yet. Check back soon.</li> : farms.map((item, index) => <motion.li className="farm" key={item.id} initial={reduced ? false : { opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.15 }} transition={{ delay: index * 0.08, duration: 0.5 }} whileHover={reduced ? undefined : { y: -6 }}>
         <div className={`farm-media crop-${item.crop_type}`}>{item.cover_image_url ? <img className="thumb" src={item.cover_image_url} alt={item.cover_image_alt || `${item.crop_type} field`} /> : <div className="thumb farm-placeholder" role="img" aria-label="No cover photo yet"><span className="field-rows" /><span className="field-sun" /></div>}<span className="crop-tag">{capital(item.crop_type)}</span></div>
         {item.cover_image_source && <a className="farm-credit" href={item.cover_image_source} target="_blank" rel="noopener noreferrer">Photo: {item.cover_image_credit || 'source'}{item.cover_image_license ? ` · ${item.cover_image_license}` : ''} ↗</a>}
         <div className="farm-content"><p className="farm-location"><span aria-hidden="true">⌁</span> {item.location}, Nigeria</p><h3>{item.name}</h3><p className="farm-farmer">Farmed by {item.farmer_first_name}</p><div className="farm-meta"><div><span className="meta-label">Current stage</span><strong>{item.latest_stage || 'Ready to start'}</strong></div><div><span className="meta-label">Community</span><strong>{item.sponsors === 0 ? 'Be the first' : `${item.sponsors} sponsor${item.sponsors === 1 ? '' : 's'}`}</strong></div></div><p className="farm-plots"><strong>{money(item.plot_price_usd, 'USD')}</strong> per plot · {item.available_plots} of {item.total_plots} plots open</p><button className="button farm-action" disabled={account === null || item.available_plots === 0} onClick={() => openSponsor(item)}>{account === null ? 'Checking account…' : item.available_plots === 0 ? 'Fully sponsored' : 'Sponsor this farm'} <span aria-hidden="true">↗</span></button></div>
-      </motion.li>)}</ul>{cropCovers.length > 0 && <div className="crop-library"><div className="crop-library-head"><div><p className="eyebrow">Crop library</p><h3>From fields across Nigeria.</h3></div><p>Pick a crop to sponsor a farm growing it. These licensed images illustrate the crops; they are not proof from a listed farm.</p></div><div className="crop-gallery">{cropCovers.map(image => <figure key={image.crop}><button type="button" className="crop-pick" onClick={() => pickCrop(image.crop)} aria-label={`Sponsor a ${image.crop} farm`}><img src={image.url} alt={image.alt} loading="lazy" /><span className="crop-pick-label">Sponsor {image.crop} <span aria-hidden="true">↗</span></span></button><figcaption><strong>{capital(image.crop)}</strong><a href={image.source} target="_blank" rel="noopener noreferrer">{image.credit} · {image.license} · resized ↗</a></figcaption></figure>)}</div></div>}</div></section>
+      </motion.li>)}</ul></div></section>
     <section className="band questions-section" id="questions"><div className="wrap"><div className="section-heading questions-heading"><div><p className="eyebrow">Good questions, clear answers</p><h2>Know where your support goes.</h2></div><p>Transparency is part of the journey. Here are the details that matter.</p></div><dl className="answers">
       <motion.div initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}><span className="answer-number">01 / VERIFY</span><dt>Who checks the photo?</dt><dd>An AI model compares the farmer's photo with what that stage should look like and says how sure it is. Clear passes go through. Unsure ones wait for a person. A photo that fails, or has been used before, releases nothing.</dd></motion.div>
       <motion.div initial={reduced ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.08 }}><span className="answer-number">02 / PAYOUT</span><dt>How does the farmer get paid?</dt><dd>Each PayPal contribution records the amount owed to the farmer. Farmer payouts are pending while a new settlement method is set up.</dd></motion.div>
