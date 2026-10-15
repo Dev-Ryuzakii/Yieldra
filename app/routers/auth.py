@@ -25,6 +25,7 @@ from app.models.investment import Investment
 from app.models.offtake import OfftakeContract
 from app.models.sponsorship import Sponsorship
 from app.models.user import User, UserRole
+from app.services import telegram_link
 from app.services.notify import WEB_PREFIX
 
 router = APIRouter(prefix="/account", tags=["auth"])
@@ -231,4 +232,16 @@ async def dashboard(identity: Annotated[dict, Depends(current_identity)],
                   "status": c.status.value, "amount": c.total_value / 100, "currency": "NGN"} for c in rows]
     elif role == "logistics":
         items = []
-    return {"profile": profile, "items": items}
+    user = await db.get(User, uid)
+    telegram = {"linked": telegram_link.is_linked(user), "bot_url": telegram_link.bot_url()}
+    return {"profile": profile, "items": items, "telegram": telegram}
+
+
+@router.post("/telegram-link")
+async def telegram_link_code(request: Request, identity: Annotated[dict, Depends(current_identity)],
+                             db: AsyncSession = Depends(get_session)) -> dict:
+    """A one-time code the signed-in user sends to the Telegram bot to link their chat."""
+    _same_origin(request)
+    profile = await _profile(identity, db)
+    user = await db.get(User, profile["id"])
+    return await telegram_link.issue(db, user)

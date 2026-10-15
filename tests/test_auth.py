@@ -171,3 +171,38 @@ async def test_operator_can_assign_existing_users_email(client, world):
     duplicate = await client.put(f"/users/{world.sponsor.id}/identity",
                                  json={"email": "farmer@example.com"})
     assert duplicate.status_code == 409
+
+
+async def test_dashboard_code_links_telegram_chat_once(client, fake_afribase, world, sent, live_setting):
+    live_setting(telegram_bot_username="YieldraBot")
+    await client.post("/account/login", json={"email": "sponsor@example.com", "password": "correct-password"})
+    assert (await client.get("/account/dashboard")).json()["telegram"] == {
+        "linked": False, "bot_url": "https://t.me/YieldraBot"}
+
+    issued = (await client.post("/account/telegram-link")).json()
+    code = issued["code"]
+    assert code.startswith("YLD-") and len(code) == 10
+    assert issued["bot_url"] == f"https://t.me/YieldraBot?start={code}"
+
+    # Someone who messaged the bot first has a chat-only account; the web account takes over the chat.
+    await client.post("/webhook/telegram", json={"chat": "5555", "text": "sponsor"})
+    linked = await client.post("/webhook/telegram", json={"chat": "5555", "text": f"/start {code.lower()}"})
+
+    assert linked.json()["result"]["status"] == "linked"
+    assert "Linked!" in sent[-2][1] and sent[-1][1] == "Yieldra: You have no active farm sponsorships yet."
+    assert (await client.get("/account/dashboard")).json()["telegram"]["linked"] is True
+    again = await client.post("/webhook/telegram", json={"chat": "9999", "text": code})
+    assert again.json()["result"]["status"] == "invalid_code"
+
+
+async def test_a_chat_linked_to_one_web_account_is_not_taken_by_another(client, fake_afribase, world, sent):
+    await client.post("/account/login", json={"email": "sponsor@example.com", "password": "correct-password"})
+    first = (await client.post("/account/telegram-link")).json()["code"]
+    await client.post("/webhook/telegram", json={"chat": "7070", "text": first})
+    await client.post("/account/logout")
+    await client.post("/account/login", json={"email": "other@example.com", "password": "correct-password"})
+    second = (await client.post("/account/telegram-link")).json()["code"]
+
+    taken = await client.post("/webhook/telegram", json={"chat": "7070", "text": second})
+
+    assert taken.json()["result"]["status"] == "chat_taken"

@@ -25,6 +25,7 @@ from app.database import get_session
 from app.models.farm import Farm
 from app.models.harvest import Harvest, HarvestStatus
 from app.models.user import Language, User, UserRole
+from app.services import telegram_link
 from app.tools import paypal
 from app.tools.telegram import get_file_url, send_text_message
 from app.utils.logger import get_logger
@@ -93,6 +94,10 @@ async def handle_inbound(
     name: str | None = None,
 ) -> dict[str, Any]:
     """Find/onboard the user for ``chat_id`` then route to the right agent."""
+    code = telegram_link.find_code(text)
+    if code is not None:
+        return await _link_chat(session, chat_id, code)
+
     user = await _find_user(session, chat_id)
 
     if user is None:
@@ -107,6 +112,35 @@ async def handle_inbound(
             "Yieldra is having trouble right now. Please try again in a moment.",
         )
         return {"status": "error", "agent": user.role.value}
+
+
+async def _link_chat(session: AsyncSession, chat_id: str, code: str) -> dict[str, Any]:
+    """The user sent the code from their dashboard: connect this chat to that account."""
+    result = await telegram_link.link(session, chat_id, code)
+    if result["status"] == "invalid_code":
+        await send_text_message(
+            chat_id,
+            "Yieldra: That code did not work or has expired. Get a new one from your "
+            "Yieldra dashboard and send it here.",
+        )
+        return {"status": "invalid_code"}
+    if result["status"] == "chat_taken":
+        await send_text_message(
+            chat_id, "Yieldra: This Telegram chat is already linked to another Yieldra account."
+        )
+        return {"status": "chat_taken"}
+
+    user: User = result["user"]
+    await send_text_message(
+        chat_id,
+        f"Yieldra: Linked! This chat is now connected to {user.name}'s account. "
+        "Milestone updates will arrive here, and you can message me any time to see "
+        "how your sponsorships are doing.",
+    )
+    if user.role == UserRole.sponsor:
+        await send_text_message(chat_id, await _sponsorship.status_text(session, user.id))
+    log.info("linked telegram chat to user=%s", user.id)
+    return {"status": "linked", "user_id": user.id}
 
 
 async def _onboard(

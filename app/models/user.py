@@ -2,7 +2,9 @@
 
 import enum
 
-from sqlalchemy import Enum, String
+from datetime import datetime
+
+from sqlalchemy import DateTime, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -33,6 +35,9 @@ class User(Base, TimestampMixin):
     # Sponsors who sign up on the web are identified by email; chat users have none.
     email: Mapped[str | None] = mapped_column(String(160), unique=True, index=True, nullable=True)
     afribase_uid: Mapped[str | None] = mapped_column(String(100), unique=True, index=True, nullable=True)
+    # One-time code a web user sends to the Telegram bot to link that chat to this account.
+    telegram_link_code: Mapped[str | None] = mapped_column(String(12), unique=True, index=True, nullable=True)
+    telegram_link_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="user_role"), nullable=False
     )
