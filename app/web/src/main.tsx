@@ -10,7 +10,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ defau
 const path = window.location.pathname;
 if (path === '/console') document.title = 'Operator console · Yieldra';
 if (path.startsWith('/s/')) document.title = 'Your sponsorship · Yieldra';
-if (path === '/auth') document.title = 'Sign in · Yieldra';
+if (path === '/signin') document.title = 'Sign in · Yieldra';
 if (path === '/dashboard') document.title = 'Your dashboard · Yieldra';
-const Page = path === '/auth' ? Auth : path === '/dashboard' ? Dashboard : path === '/console' ? Console : path.startsWith('/s/') ? Tracking : Landing;
+const Page = path === '/signin' ? Auth : path === '/dashboard' ? Dashboard : path === '/console' ? Console : path.startsWith('/s/') ? Tracking : Landing;
 createRoot(document.getElementById('root')!).render(<Suspense fallback={<p className="wrap empty">Loading Yieldra…</p>}><Page /></Suspense>);

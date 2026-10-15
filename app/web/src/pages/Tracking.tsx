@@ -44,7 +44,7 @@ export function Tracking() {
       currentRef.current = result; setCurrent(result); setError('');
       document.title = `${result.farm_name} · Yieldra`;
       remember({ reference: result.reference, farm: result.farm_name, total: result.total });
-    } catch (err) { if (err instanceof ApiError && err.status === 401) { window.location.assign(`/auth?next=${encodeURIComponent(window.location.pathname)}`); return; } if (!currentRef.current) { setError(message(err)); setStatus(err instanceof ApiError ? err.status : 0); } }
+    } catch (err) { if (err instanceof ApiError && err.status === 401) { window.location.assign(`/signin?next=${encodeURIComponent(window.location.pathname)}`); return; } if (!currentRef.current) { setError(message(err)); setStatus(err instanceof ApiError ? err.status : 0); } }
   }, [reference]);
   useEffect(() => {
     void load(true);

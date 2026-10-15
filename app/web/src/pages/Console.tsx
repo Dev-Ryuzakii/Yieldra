@@ -59,7 +59,7 @@ export function Console() {
   const [evidenceResult, setEvidenceResult] = useState('');
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   const call = useCallback(<T,>(path: string, options: { method?: string; body?: unknown } = {}) => api<T>(path, { ...options, adminKey: key || undefined }), [key]);
-  useEffect(() => { api<{ role: string }>('/auth/me').then(profile => setOperatorSession(profile.role === 'operator')).catch(() => {}); }, []);
+  useEffect(() => { api<{ role: string }>('/account/me').then(profile => setOperatorSession(profile.role === 'operator')).catch(() => {}); }, []);
   const loadLedger = useCallback(async (keepId?: number) => {
     setLedgerError('');
     try {

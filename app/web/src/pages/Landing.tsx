@@ -35,10 +35,10 @@ export function Landing() {
   const bounds = limits[rail];
   useEffect(() => { api<Farm[]>('/sponsorships/farms/overview').then(setFarms).catch(err => setFarmError(message(err))); }, []);
   useEffect(() => { api<CropCover[]>('/media/covers').then(setCropCovers).catch(() => {}); }, []);
-  useEffect(() => { api<AccountSession>('/auth/session').then(result => { setAccount(result); if (result.authenticated && result.profile) { setName(result.profile.name); setEmail(result.profile.email); setSignedInEmail(result.profile.email); } }).catch(err => setAccountError(message(err))); }, []);
+  useEffect(() => { api<AccountSession>('/account/session').then(result => { setAccount(result); if (result.authenticated && result.profile) { setName(result.profile.name); setEmail(result.profile.email); setSignedInEmail(result.profile.email); } }).catch(err => setAccountError(message(err))); }, []);
   function openSponsor(selected: Farm) {
     if (account === null) return;
-    if (!account.authenticated) { window.location.assign('/auth?next=%2F%23farms'); return; }
+    if (!account.authenticated) { window.location.assign('/signin?next=%2F%23farms'); return; }
     setFarm(selected); setAmount('100'); setError(''); dialog.current?.showModal();
   }
   async function submit(event: FormEvent) {
@@ -52,7 +52,7 @@ export function Landing() {
       const started = await api<Checkout>('/sponsorships/checkout', { method: 'POST', body: { farm_id: farm.id, amount: total, rail, name: name.trim(), email: email.trim() } });
       remember({ reference: started.sponsorship.reference, farm: started.sponsorship.farm_name, total: started.sponsorship.total });
       window.location.assign(started.approve_url);
-    } catch (err) { if (err instanceof ApiError && err.status === 401) { window.location.assign('/auth?next=%2F%23farms'); return; } setError(message(err)); setBusy(false); }
+    } catch (err) { if (err instanceof ApiError && err.status === 401) { window.location.assign('/signin?next=%2F%23farms'); return; } setError(message(err)); setBusy(false); }
   }
   const preview = Number(amount) > 0 ? splitMinor(Math.round(Number(amount) * 100)).map((minor, index) => ({ title: SHORT_TITLES[index], amount: money(minor / 100, config.currency), share: SHARES[index], state: index === 0 ? 'awaiting_payment' : 'locked', note: index === 0 ? 'Paid today' : 'After its photo passes' })) : [];
   return <><Header /><main>
@@ -62,7 +62,7 @@ export function Landing() {
           <p className="eyebrow light"><span className="eyebrow-dot" /> A better way to back farming</p>
           <h1>Grow something <em>real.</em></h1>
           <p className="lead">Sponsor a farm in Nigeria and follow four clear stages of growth. Each new stage is backed by a verified update.</p>
-          <div className="hero-actions"><a className="button hero-button" href="#farms">Explore open farms <span aria-hidden="true">↗</span></a>{account && <a className="button hero-login" href={account.authenticated ? '/dashboard' : '/auth'}>{account.authenticated ? 'My account' : 'Sign in'} <span aria-hidden="true">↗</span></a>}</div>
+          <div className="hero-actions"><a className="button hero-button" href="#farms">Explore open farms <span aria-hidden="true">↗</span></a>{account && <a className="button hero-login" href={account.authenticated ? '/dashboard' : '/signin'}>{account.authenticated ? 'My account' : 'Sign in'} <span aria-hidden="true">↗</span></a>}</div>
           <div className="hero-footnote"><span className="hero-footnote-icon" aria-hidden="true">✳</span><span>Visible progress. Purposeful support.</span></div>
         </motion.div>
         <motion.div className="hero-art" aria-hidden="true" initial={reduced ? false : { opacity: 0, scale: 0.93, rotate: -3 }} animate={{ opacity: 1, scale: 1, rotate: 0 }} transition={{ duration: 0.8, delay: 0.18 }}>

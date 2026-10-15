@@ -11,8 +11,8 @@ export function Dashboard() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(true);
   const reduced = useReducedMotion();
-  useEffect(() => { api<Data>('/auth/dashboard').then(setData).catch(cause => { if (cause?.status === 401) { location.href = '/auth'; return; } setError(message(cause)); }).finally(() => setBusy(false)); }, []);
-  async function signOut() { try { await api('/auth/logout', { method: 'POST' }); location.href = '/'; } catch (cause) { setError(message(cause)); } }
+  useEffect(() => { api<Data>('/account/dashboard').then(setData).catch(cause => { if (cause?.status === 401) { location.href = '/signin'; return; } setError(message(cause)); }).finally(() => setBusy(false)); }, []);
+  async function signOut() { try { await api('/account/logout', { method: 'POST' }); location.href = '/'; } catch (cause) { setError(message(cause)); } }
   const role = data?.profile.role || 'sponsor';
   return <><Header /><main className="wrap dashboard-page">
     <motion.section className="dashboard-hero" initial={reduced ? false : { opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}><div><p className="eyebrow">Your space · {role}</p><h1>{data ? `Hello, ${data.profile.name.split(' ')[0]}.` : 'Your dashboard'}</h1><p>{data ? `A clear view of ${role === 'operator' ? 'the platform' : 'what is growing around you'}.` : 'Loading your space…'}</p></div><span aria-hidden="true">✳</span></motion.section>

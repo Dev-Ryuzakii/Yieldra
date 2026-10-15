@@ -32,7 +32,7 @@ async def landing() -> FileResponse:
 
 
 def _login_redirect(path: str) -> RedirectResponse:
-    return RedirectResponse(f"/auth?next={quote(path, safe='')}", status_code=303)
+    return RedirectResponse(f"/signin?next={quote(path, safe='')}", status_code=303)
 
 
 def _forward_session(source: Response, target: Response) -> Response:
@@ -74,7 +74,7 @@ async def console(request: Request, session: AsyncSession = Depends(get_session)
     return _forward_session(response, _page(noindex=True))
 
 
-@router.get("/auth", include_in_schema=False)
+@router.get("/signin", include_in_schema=False)
 async def auth_page() -> FileResponse:
     return _page(noindex=True)
 

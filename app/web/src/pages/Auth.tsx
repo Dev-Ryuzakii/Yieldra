@@ -15,11 +15,11 @@ export function Auth() {
   const [notice, setNotice] = useState('');
   const reduced = useReducedMotion();
   const meta = useMeta();
-  useEffect(() => { api<{ authenticated: boolean }>('/auth/session').then(result => { if (result.authenticated) location.href = afterSignIn; }).catch(() => {}); }, []);
+  useEffect(() => { api<{ authenticated: boolean }>('/account/session').then(result => { if (result.authenticated) location.href = afterSignIn; }).catch(() => {}); }, []);
   async function submit(event: FormEvent) {
     event.preventDefault(); setError(''); setNotice(''); setBusy(true);
     try {
-      const result = await api<{ status: string }>(`/auth/${mode}`, { method: 'POST', body: mode === 'register' ? { email, password, name } : { email, password } });
+      const result = await api<{ status: string }>(`/account/${mode}`, { method: 'POST', body: mode === 'register' ? { email, password, name } : { email, password } });
       if (result.status === 'signed_in') location.href = afterSignIn;
       else setNotice('Check your inbox to confirm your email, then sign in.');
     } catch (cause) { setError(message(cause)); }

@@ -78,7 +78,7 @@ export function remember(entry: Remembered) {
 }
 export function Header({ consolePage = false }: { consolePage?: boolean }) {
   const [session, setSession] = useState<AccountSession | null>(null);
-  useEffect(() => { api<AccountSession>('/auth/session').then(setSession).catch(() => {}); }, []);
-  return <header className="wrap site-header"><a className="wordmark" href="/">Yieldra<span className="brand-star" aria-hidden="true">✳</span></a><nav className="site-nav" aria-label="Site">{consolePage ? <><a href="/">Sponsor pages</a><a href="/dashboard">Dashboard</a><a href="/docs">API</a></> : <><a href="/#farms">Farms</a><a href="/#questions">Questions</a>{session?.authenticated ? <a href="/dashboard">My account</a> : session ? <a href="/auth">Sign in</a> : null}</>}</nav></header>;
+  useEffect(() => { api<AccountSession>('/account/session').then(setSession).catch(() => {}); }, []);
+  return <header className="wrap site-header"><a className="wordmark" href="/">Yieldra<span className="brand-star" aria-hidden="true">✳</span></a><nav className="site-nav" aria-label="Site">{consolePage ? <><a href="/">Sponsor pages</a><a href="/dashboard">Dashboard</a><a href="/docs">API</a></> : <><a href="/#farms">Farms</a><a href="/#questions">Questions</a>{session?.authenticated ? <a href="/dashboard">My account</a> : session ? <a href="/signin">Sign in</a> : null}</>}</nav></header>;
 }
 export function message(error: unknown) { return error instanceof Error ? error.message : 'Something went wrong. Please try again.'; }

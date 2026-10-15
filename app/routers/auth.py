@@ -27,7 +27,7 @@ from app.models.sponsorship import Sponsorship
 from app.models.user import User, UserRole
 from app.services.notify import WEB_PREFIX
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/account", tags=["auth"])
 COOKIE = "yieldra_session"
 _DEV_COOKIE_KEY = secrets.token_bytes(32)
 

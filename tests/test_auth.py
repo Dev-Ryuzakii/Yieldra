@@ -48,30 +48,30 @@ async def test_login_uses_verified_email_and_role_scoped_dashboard(client, sessi
                             sponsor_id=world.sponsor.id, total_minor=10000))
     await session.commit()
 
-    assert (await client.get("/auth/session")).json() == {"authenticated": False}
-    login = await client.post("/auth/login", json={"email": "farmer@example.com", "password": "correct-password"})
+    assert (await client.get("/account/session")).json() == {"authenticated": False}
+    login = await client.post("/account/login", json={"email": "farmer@example.com", "password": "correct-password"})
     assert login.status_code == 200
     assert login.json()["profile"]["role"] == "farmer"
     assert "httponly" in login.headers["set-cookie"].lower()
-    assert (await client.get("/auth/session")).json()["profile"]["role"] == "farmer"
+    assert (await client.get("/account/session")).json()["profile"]["role"] == "farmer"
     assert (await client.get("/")).status_code == 200
-    assert (await client.get("/auth/session")).json()["authenticated"] is True
-    farmer = (await client.get("/auth/dashboard")).json()
+    assert (await client.get("/account/session")).json()["authenticated"] is True
+    farmer = (await client.get("/account/dashboard")).json()
     assert farmer["profile"]["role"] == "farmer"
     assert [item["title"] for item in farmer["items"]] == [world.farm.name]
     assert "ONLY-SPONSOR" not in str(farmer)
 
-    await client.post("/auth/logout")
-    assert (await client.get("/auth/dashboard")).status_code == 401
-    login = await client.post("/auth/login", json={"email": "sponsor@example.com", "password": "correct-password"})
+    await client.post("/account/logout")
+    assert (await client.get("/account/dashboard")).status_code == 401
+    login = await client.post("/account/login", json={"email": "sponsor@example.com", "password": "correct-password"})
     assert login.status_code == 200
-    sponsor = (await client.get("/auth/dashboard")).json()
+    sponsor = (await client.get("/account/dashboard")).json()
     assert sponsor["profile"]["role"] == "sponsor"
     assert [item["href"] for item in sponsor["items"]] == ["/s/ONLY-SPONSOR"]
 
-    await client.post("/auth/logout")
-    await client.post("/auth/login", json={"email": "other@example.com", "password": "correct-password"})
-    other = (await client.get("/auth/dashboard")).json()
+    await client.post("/account/logout")
+    await client.post("/account/login", json={"email": "other@example.com", "password": "correct-password"})
+    other = (await client.get("/account/dashboard")).json()
     assert other["profile"]["role"] == "sponsor"
     assert other["items"] == []
 
@@ -83,21 +83,21 @@ async def test_private_pages_and_reference_api_require_the_owner(client, session
                             sponsor_id=world.sponsor.id, total_minor=10000))
     await session.commit()
 
-    assert (await client.get("/dashboard", follow_redirects=False)).headers["location"] == "/auth?next=%2Fdashboard"
-    assert (await client.get("/console", follow_redirects=False)).headers["location"] == "/auth?next=%2Fconsole"
-    assert (await client.get("/s/OWNER-ONLY", follow_redirects=False)).headers["location"] == "/auth?next=%2Fs%2FOWNER-ONLY"
+    assert (await client.get("/dashboard", follow_redirects=False)).headers["location"] == "/signin?next=%2Fdashboard"
+    assert (await client.get("/console", follow_redirects=False)).headers["location"] == "/signin?next=%2Fconsole"
+    assert (await client.get("/s/OWNER-ONLY", follow_redirects=False)).headers["location"] == "/signin?next=%2Fs%2FOWNER-ONLY"
     assert (await client.get("/sponsorships/ref/OWNER-ONLY")).status_code == 401
     assert (await client.post("/sponsorships/ref/OWNER-ONLY/cancel")).status_code == 401
 
-    await client.post("/auth/login", json={"email": "other@example.com", "password": "correct-password"})
+    await client.post("/account/login", json={"email": "other@example.com", "password": "correct-password"})
     assert (await client.get("/dashboard")).status_code == 200
     assert (await client.get("/console")).status_code == 403
     assert (await client.get("/s/OWNER-ONLY")).status_code == 403
     assert (await client.get("/sponsorships/ref/OWNER-ONLY")).status_code == 403
     assert (await client.post("/sponsorships/ref/OWNER-ONLY/cancel")).status_code == 403
 
-    await client.post("/auth/logout")
-    await client.post("/auth/login", json={"email": "sponsor@example.com", "password": "correct-password"})
+    await client.post("/account/logout")
+    await client.post("/account/login", json={"email": "sponsor@example.com", "password": "correct-password"})
     assert (await client.get("/s/OWNER-ONLY")).status_code == 200
     assert (await client.get("/sponsorships/ref/OWNER-ONLY")).status_code == 200
 
@@ -106,7 +106,7 @@ async def test_checkout_needs_verified_sign_in(client, world, fake_afribase):
     payload = {"farm_id": world.farm.id, "amount": 100, "rail": "paypal",
                "name": "Guest", "email": "sponsor@example.com"}
     assert (await client.post("/sponsorships/checkout", json=payload)).status_code == 401
-    await client.post("/auth/login", json={"email": "other@example.com", "password": "correct-password"})
+    await client.post("/account/login", json={"email": "other@example.com", "password": "correct-password"})
     assert (await client.post("/sponsorships/checkout", json=payload)).status_code == 403
 
 
@@ -114,7 +114,7 @@ async def test_unverified_email_cannot_link_or_sign_in(client, fake_afribase, se
     fake_afribase["farmer@example.com"]["confirmed_at"] = None
     world.farmer.email = "farmer@example.com"
     await session.commit()
-    result = await client.post("/auth/login", json={"email": "farmer@example.com", "password": "correct-password"})
+    result = await client.post("/account/login", json={"email": "farmer@example.com", "password": "correct-password"})
     assert result.status_code == 403
     assert "yieldra_session" not in client.cookies
     assert world.farmer.afribase_uid is None
@@ -122,17 +122,17 @@ async def test_unverified_email_cannot_link_or_sign_in(client, fake_afribase, se
 
 async def test_operator_allowlist_is_server_controlled(client, fake_afribase, live_setting):
     live_setting(operator_emails="other@example.com", secret_key="test-secret")
-    await client.post("/auth/login", json={"email": "other@example.com", "password": "correct-password"})
-    me = (await client.get("/auth/me")).json()
+    await client.post("/account/login", json={"email": "other@example.com", "password": "correct-password"})
+    me = (await client.get("/account/me")).json()
     assert me["role"] == "operator"
     assert (await client.get("/console/ledger")).status_code == 200
-    await client.post("/auth/logout")
-    await client.post("/auth/login", json={"email": "sponsor@example.com", "password": "correct-password"})
+    await client.post("/account/logout")
+    await client.post("/account/login", json={"email": "sponsor@example.com", "password": "correct-password"})
     assert (await client.get("/console/ledger")).status_code == 403
 
 
 async def test_registration_needs_confirmation(client, fake_afribase):
-    result = await client.post("/auth/register", json={"name": "Ada Okafor", "email": "ada@example.com", "password": "long-password"})
+    result = await client.post("/account/register", json={"name": "Ada Okafor", "email": "ada@example.com", "password": "long-password"})
     assert result.status_code == 200
     assert result.json() == {"status": "check_email"}
     assert "yieldra_session" not in client.cookies
@@ -153,7 +153,7 @@ async def test_allowlisted_operator_can_register_and_enter_console(client, fake_
         raise AssertionError(path)
 
     monkeypatch.setattr(auth, "_call", call)
-    result = await client.post("/auth/register", json={"name": "Test Operator",
+    result = await client.post("/account/register", json={"name": "Test Operator",
                                                        "email": "other@example.com",
                                                        "password": "long-password"})
     assert result.status_code == 200
