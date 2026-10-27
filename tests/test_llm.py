@@ -185,20 +185,25 @@ def test_model_defaults_follow_provider_and_can_be_overridden():
     claude = Settings(_env_file=None, llm_provider="anthropic", model_report="")
     assert claude.model_vision.startswith("claude-")
 
-    qwen = Settings(
+    openai = Settings(
         _env_file=None,
         llm_provider="openai",
         llm_api_key="xxx",
+        openai_api_key="sk-openai",
         llm_base_url="",
-        dashscope_api_key="sk-real",
         model_vision="",
         model_report="my-model",
     )
-    assert qwen.model_vision.startswith("qwen")
-    assert qwen.model_report == "my-model"
-    # Legacy Qwen variables still work when the generic ones are not set.
-    assert qwen.resolved_llm_api_key == "sk-real"
-    assert "dashscope" in qwen.resolved_llm_base_url
+    assert openai.model_vision == "gpt-5.4"
+    assert openai.model_advisory == "gpt-5.4-mini"
+    assert openai.model_report == "my-model"
+    assert openai.resolved_llm_api_key == "sk-openai"
+    assert openai.resolved_llm_base_url is None
+
+    custom = Settings(_env_file=None, llm_provider="openai", openai_api_key="",
+                      llm_api_key="sk-custom", llm_base_url="https://example.com/v1")
+    assert custom.resolved_llm_api_key == "sk-custom"
+    assert custom.resolved_llm_base_url == "https://example.com/v1"
 
     with pytest.raises(ValueError):
         Settings(_env_file=None, llm_provider="nope")

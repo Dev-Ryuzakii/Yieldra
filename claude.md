@@ -6,6 +6,6 @@ The active sponsor rail is PayPal in US dollars. Each captured tranche records a
 
 Afribase Auth manages sign-in. Keep service role and JWT secrets server-side. The React and TypeScript frontend is built with Vite and served by FastAPI.
 
-AI runs through `app/agents/base.py`. For AgentRouter, set `LLM_PROVIDER=anthropic`, `LLM_BASE_URL=https://co.agentrouter.org`, and a local `LLM_API_KEY`; select model IDs available to that key with `MODEL_*`. Do not commit credentials.
+AI runs through `app/agents/base.py`. The default provider is OpenAI. Set `OPENAI_API_KEY` on the application server; select model IDs with `MODEL_*` if needed. Do not commit credentials.
 
 Run `.venv/bin/pytest -q` and `cd app/web && npm run build` after payment or frontend changes.

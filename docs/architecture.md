@@ -19,7 +19,7 @@ The database keeps older naira sponsorship and Tuago payout columns so historica
 
 ## AI configuration
 
-`app/agents/base.py` supports Anthropic and OpenAI-compatible APIs. AgentRouter's Anthropic-compatible endpoint is configured with `LLM_PROVIDER=anthropic`, `LLM_BASE_URL=https://co.agentrouter.org`, and a local `LLM_API_KEY`. Model names can be overridden with `MODEL_*` variables. Without a valid key, photo verification cannot run.
+`app/agents/base.py` supports Anthropic and OpenAI-compatible APIs. The default is OpenAI Chat Completions with `LLM_PROVIDER=openai`, `LLM_BASE_URL=https://api.openai.com/v1`, and `OPENAI_API_KEY`. General agents use `gpt-5.4-mini`; photo diagnosis and milestone verification use `gpt-5.4`. Model names can be overridden with `MODEL_*` variables. Without a valid key, photo verification cannot run.
 
 ## Safety of state changes
 

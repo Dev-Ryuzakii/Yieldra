@@ -40,41 +40,54 @@ def main() -> None:
     if not base or not key:
         raise SystemExit("Set AFRIBASE_URL and AFRIBASE_SERVICE_ROLE_KEY in .env")
     headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+    target = ROOT / "data" / "farm_covers.json"
+    existing = {item["crop"]: item for item in json.loads(target.read_text())} if target.exists() else {}
+    local_dir = ROOT / "app" / "web" / "public" / "assets" / "farm-covers"
     output: list[dict] = []
-    with httpx.Client(timeout=30, headers={"User-Agent": "Yieldra/1.0 (licensed farm covers)"}) as public:
+    with httpx.Client(timeout=30, headers={"User-Agent": "Yieldra/1.0 (https://github.com/Dev-Ryuzakii/Yieldra)"}) as public:
         with httpx.Client(timeout=30) as storage:
             for item in IMAGES:
-                metadata = public.get("https://commons.wikimedia.org/w/api.php", params={
-                    "action": "query", "format": "json", "prop": "imageinfo",
-                    "iiprop": "url|extmetadata", "iiurlwidth": "1200",
-                    "titles": f"File:{item['file']}",
-                })
-                metadata.raise_for_status()
-                info = next(iter(metadata.json()["query"]["pages"].values()))["imageinfo"][0]
-                license_name = info["extmetadata"]["LicenseShortName"]["value"]
-                if license_name != item["license"]:
-                    raise RuntimeError(f"License changed for {item['file']}: {license_name}")
-                download = public.get(info["thumburl"])
-                download.raise_for_status()
-                image = ImageOps.exif_transpose(Image.open(io.BytesIO(download.content))).convert("RGB")
-                image.thumbnail((1200, 1200))
-                buffer = io.BytesIO()
-                image.save(buffer, format="WEBP", quality=82, method=6)
                 path = f"{item['crop']}-illustrative.webp"
+                local_path = local_dir / path
+                if local_path.exists() and item["crop"] in existing:
+                    content = local_path.read_bytes()
+                    source = existing[item["crop"]]["source"]
+                else:
+                    metadata = public.get("https://commons.wikimedia.org/w/api.php", params={
+                        "action": "query", "format": "json", "prop": "imageinfo",
+                        "iiprop": "url|extmetadata", "iiurlwidth": "1200",
+                        "titles": f"File:{item['file']}",
+                    })
+                    metadata.raise_for_status()
+                    info = next(iter(metadata.json()["query"]["pages"].values()))["imageinfo"][0]
+                    license_name = info["extmetadata"]["LicenseShortName"]["value"]
+                    if license_name != item["license"]:
+                        raise RuntimeError(f"License changed for {item['file']}: {license_name}")
+                    download = public.get(info["thumburl"])
+                    download.raise_for_status()
+                    image = ImageOps.exif_transpose(Image.open(io.BytesIO(download.content))).convert("RGB")
+                    image.thumbnail((1200, 1200))
+                    buffer = io.BytesIO()
+                    image.save(buffer, format="WEBP", quality=82, method=6)
+                    content = buffer.getvalue()
+                    source = info["descriptionurl"]
+                    local_dir.mkdir(parents=True, exist_ok=True)
+                    local_path.write_bytes(content)
                 result = storage.post(f"{base}/storage/v1/object/{BUCKET}/{quote(path)}",
                     headers={**headers, "Content-Type": "image/webp", "x-upsert": "true"},
-                    content=buffer.getvalue())
+                    content=content)
                 if result.status_code not in (200, 201):
                     raise RuntimeError(f"Upload failed for {item['crop']}: HTTP {result.status_code}: {result.text[:200]}")
                 public_url = f"{base}/storage/v1/object/public/{BUCKET}/{path}"
                 check = public.get(public_url)
                 check.raise_for_status()
+                if check.content != content:
+                    raise RuntimeError(f"Public cover differs from uploaded file: {item['crop']}")
                 output.append({"crop": item["crop"], "url": public_url,
                     "alt": item["alt"], "credit": item["author"], "license": item["license"],
-                    "source": info["descriptionurl"], "changes": "Resized and converted to WebP",
+                    "source": source, "changes": "Resized and converted to WebP",
                     "illustrative": True})
-                print(f"Uploaded {item['crop']} cover ({len(buffer.getvalue()) // 1024} KiB)")
-    target = ROOT / "data" / "farm_covers.json"
+                print(f"Uploaded {item['crop']} cover ({len(content) // 1024} KiB)")
     target.parent.mkdir(exist_ok=True)
     target.write_text(json.dumps(output, indent=2) + "\n")
     print(f"Saved public URLs and attribution to {target.relative_to(ROOT)}")

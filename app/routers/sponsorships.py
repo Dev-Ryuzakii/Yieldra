@@ -128,11 +128,15 @@ async def farms_overview(session: AsyncSession = Depends(get_session)) -> list[d
     """Farms open to sponsors, with how far each has come."""
     farms = list((await session.execute(select(Farm).order_by(Farm.id))).scalars())
     # A farm without its own cover shows the licensed photo of its crop instead.
+    from app.services.crop_covers import cover_for_crop
+
     crop_images = {image.crop: image for image in (await session.execute(select(CropImage))).scalars()}
     out: list[dict] = []
     for farm in farms:
         farmer = await session.get(User, farm.farmer_id)
-        fallback = None if farm.cover_image_url else crop_images.get(farm.crop_type)
+        fallback = None if farm.cover_image_url else cover_for_crop(
+            farm.crop_type, crop_images.get(farm.crop_type)
+        )
         ready = await session.execute(
             select(PayoutAccount.id).where(PayoutAccount.user_id == farm.farmer_id)
         )
@@ -166,11 +170,11 @@ async def farms_overview(session: AsyncSession = Depends(get_session)) -> list[d
                 "total_plots": farm.total_plots,
                 "available_plots": farm.available_plots,
                 "plot_price_usd": plot_price_usd(farm.crop_type),
-                "cover_image_url": fallback.image_url if fallback else farm.cover_image_url,
-                "cover_image_alt": fallback.alt if fallback else farm.cover_image_alt,
-                "cover_image_credit": fallback.credit if fallback else farm.cover_image_credit,
-                "cover_image_source": fallback.source_url if fallback else farm.cover_image_source,
-                "cover_image_license": fallback.license if fallback else farm.cover_image_license,
+                "cover_image_url": fallback["url"] if fallback else farm.cover_image_url,
+                "cover_image_alt": fallback["alt"] if fallback else farm.cover_image_alt,
+                "cover_image_credit": fallback["credit"] if fallback else farm.cover_image_credit,
+                "cover_image_source": fallback["source"] if fallback else farm.cover_image_source,
+                "cover_image_license": fallback["license"] if fallback else farm.cover_image_license,
                 "farmer_first_name": farmer.name.split()[0] if farmer else None,
                 "naira_ready": ready.first() is not None,
                 "sponsors": sponsors.scalar_one(),

@@ -21,21 +21,23 @@ Do not promise farmers that a bank transfer has completed based on a PayPal capt
 
 The operator account is selected by a verified email in `OPERATOR_EMAILS`. Other users can register through Afribase Auth and view their role dashboard. Set `AFRIBASE_URL` to the project root URL and `AFRIBASE_ANON_KEY` to the public anon key. Keep `AFRIBASE_SERVICE_ROLE_KEY` server-side for the publishing script only.
 
-## AgentRouter
+The six licensed demo farm covers are also kept in `app/web/public/assets/farm-covers/`. The app serves these copies for seeded farms, so cards remain visible if Afribase Storage has an outage. To repair the public Storage objects, set `AFRIBASE_SERVICE_ROLE_KEY` locally and run `.venv/bin/python scripts/publish_farm_covers.py`; it upserts each copy and verifies the public download.
 
-The AI client already supports Anthropic-compatible endpoints. `.env.example` uses AgentRouter's Anthropic-compatible base URL:
+## OpenAI
+
+The AI agents use OpenAI Chat Completions. Set these values on the app deployment:
 
 ```env
-LLM_PROVIDER=anthropic
-LLM_BASE_URL=https://co.agentrouter.org
-LLM_API_KEY=xxx
+LLM_PROVIDER=openai
+LLM_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=your-key
 ```
 
-Replace `LLM_API_KEY` locally when the AgentRouter key is available. Set `MODEL_MILESTONE`, `MODEL_VISION`, `MODEL_REPORT` and other `MODEL_*` variables to model IDs enabled for that key. Run `python scripts/check_llm.py` to verify the connection. Until a working key and model are configured, evidence verification stays unavailable. AgentRouter also documents an OpenAI-compatible base at `https://co.agentrouter.org/v1`; the app supports that with `LLM_PROVIDER=openai`.
+The default models are `gpt-5.4-mini` for general agents and `gpt-5.4` for photo diagnosis and milestone verification. Set `MODEL_*` variables to override individual agents. Run `python scripts/check_llm.py` to verify the key and model access. Until a working key is configured, evidence verification stays unavailable. The application server needs these variables; Afribase Auth and Storage alone do not run the AI agents.
 
 ## Deployment
 
-`render.yaml` describes an API and Postgres deployment. Set the public URL, Afribase Auth values, PayPal sandbox credentials, `LLM_API_KEY`, and a production `SECRET_KEY` in the host environment. Register `<PUBLIC_BASE_URL>/webhook/paypal` in PayPal. Do not enable PayPal live payments until farmer settlement has been implemented and verified.
+`render.yaml` describes an API and Postgres deployment. Set the public URL, Afribase Auth values, PayPal sandbox credentials, `OPENAI_API_KEY`, and a production `SECRET_KEY` in the host environment. Register `<PUBLIC_BASE_URL>/webhook/paypal` in PayPal. Do not enable PayPal live payments until farmer settlement has been implemented and verified.
 
 ## Checks
 

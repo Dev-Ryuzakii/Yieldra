@@ -4,7 +4,7 @@
 
 Runs three small calls against whatever LLM_PROVIDER / LLM_API_KEY / LLM_BASE_URL
 point at: a plain reply, a tool call, and a forced structured answer. Use it to
-confirm a new key (Anthropic, an Anthropic-compatible gateway, or Qwen) before
+confirm a new key (OpenAI or a compatible gateway) before
 starting the app. Exits non-zero if any check fails.
 """
 
@@ -71,7 +71,7 @@ async def main() -> int:
     endpoint = settings.resolved_llm_base_url or "provider default"
     print(f"provider={settings.llm_provider}  endpoint={endpoint}  model={settings.model_advisory}")
     if not settings.llm_live:
-        print("FAIL  no key set: put LLM_API_KEY in .env")
+        print("FAIL  no key set: put OPENAI_API_KEY in .env or the deployment environment")
         return 1
 
     agent = BaseAgent(model=settings.model_advisory, system_prompt="You are a concise assistant.")

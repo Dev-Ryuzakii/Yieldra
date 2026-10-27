@@ -17,15 +17,15 @@ _DEFAULT_MODELS: dict[str, dict[str, str]] = {
         "model_vision": "claude-sonnet-5-5",
         "model_milestone": "claude-sonnet-5-5",
     },
-    # OpenAI-compatible endpoints (Qwen on Alibaba Cloud Model Studio by default).
+    # OpenAI API defaults. The image-checking agents use the stronger model.
     "openai": {
-        "model_investment": "qwen3.7-max",
-        "model_logistics": "qwen3.7-max",
-        "model_offtake": "qwen3.7-max",
-        "model_advisory": "qwen3.6-flash",
-        "model_report": "qwen3.6-flash",
-        "model_vision": "qwen3.7-plus",
-        "model_milestone": "qwen3.7-plus",
+        "model_investment": "gpt-5.4-mini",
+        "model_logistics": "gpt-5.4-mini",
+        "model_offtake": "gpt-5.4-mini",
+        "model_advisory": "gpt-5.4-mini",
+        "model_report": "gpt-5.4-mini",
+        "model_vision": "gpt-5.4",
+        "model_milestone": "gpt-5.4",
     },
 }
 
@@ -44,16 +44,12 @@ class Settings(BaseSettings):
     # LLM provider.
     #   anthropic — Claude through the Anthropic Messages API. Set LLM_BASE_URL to use
     #               an Anthropic-compatible gateway instead of api.anthropic.com.
-    #   openai    — any OpenAI-compatible chat-completions endpoint (Qwen, etc.).
-    llm_provider: str = "anthropic"
+    #   openai    — OpenAI Chat Completions, or another compatible endpoint via LLM_BASE_URL.
+    llm_provider: str = "openai"
     llm_api_key: str = "xxx"
+    openai_api_key: str = ""
     llm_base_url: str = ""
     llm_max_tokens: int = 1024
-
-    # Legacy Qwen / Alibaba Cloud settings. Used only when LLM_PROVIDER=openai and the
-    # generic LLM_API_KEY / LLM_BASE_URL are not set.
-    dashscope_api_key: str = "sk-xxx"
-    qwen_base_url: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
     # Database
     database_url: str = "postgresql+asyncpg://yieldra:password@localhost:5432/yieldra_db"
@@ -124,7 +120,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _fill_model_defaults(self) -> "Settings":
-        self.llm_provider = (self.llm_provider or "anthropic").strip().lower()
+        self.llm_provider = (self.llm_provider or "openai").strip().lower()
         if self.llm_provider not in _DEFAULT_MODELS:
             raise ValueError(
                 f"LLM_PROVIDER must be one of {sorted(_DEFAULT_MODELS)}, got {self.llm_provider!r}"
@@ -147,11 +143,9 @@ class Settings(BaseSettings):
     # -- LLM -----------------------------------------------------------------
     @property
     def resolved_llm_api_key(self) -> str:
-        """The key the agents send. Falls back to the legacy Qwen key for provider=openai."""
-        if not self._is_placeholder(self.llm_api_key):
-            return self.llm_api_key
-        if self.llm_provider == "openai":
-            return self.dashscope_api_key
+        """Use OPENAI_API_KEY for OpenAI, with LLM_API_KEY for custom endpoints."""
+        if self.llm_provider == "openai" and not self._is_placeholder(self.openai_api_key):
+            return self.openai_api_key
         return self.llm_api_key
 
     @property
@@ -159,8 +153,6 @@ class Settings(BaseSettings):
         """Custom endpoint, or None to use the provider SDK's default."""
         if self.llm_base_url.strip():
             return self.llm_base_url.strip()
-        if self.llm_provider == "openai":
-            return self.qwen_base_url
         return None
 
     @property

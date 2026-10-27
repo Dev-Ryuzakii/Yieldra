@@ -319,9 +319,14 @@ async def test_farm_overview_and_ledger_follow_a_sponsorship(client, world, sent
         "total_plots": 10, "available_plots": 10, "plot_price_usd": 40,
         "location": "Ogun", "farmer_first_name": "Adunni", "naira_ready": False,
         "sponsors": 0, "latest_stage": None, "latest_photo_url": None,
-        "cover_image_url": None, "cover_image_alt": None, "cover_image_credit": None,
-        "cover_image_source": None, "cover_image_license": None,
+        "cover_image_url": "/assets/farm-covers/cassava-illustrative.webp",
+        "cover_image_alt": "Cassava plants growing in a field in Nigeria",
+        "cover_image_credit": "Ghabzman",
+        "cover_image_source": "https://commons.wikimedia.org/wiki/File:Cassava_plantation_farm.jpg",
+        "cover_image_license": "CC BY 4.0",
     }]
+    cover = await client.get(before[0]["cover_image_url"])
+    assert cover.status_code == 200 and cover.headers["content-type"] == "image/webp"
 
     started = await start(client, world)
     await client.get(path_of(started["approve_url"]))
@@ -342,6 +347,23 @@ async def test_farm_overview_and_ledger_follow_a_sponsorship(client, world, sent
     assert planted["payout_status"] == "pending_manual" and planted["payout_naira"] == 45_000.0
     assert planted["farmer_has_bank"] is False
 
+
+async def test_seeded_afribase_cover_uses_local_copy(client, session, world):
+    from app.models.media import CropImage
+
+    session.add(CropImage(
+        crop="cassava",
+        image_url="https://5ngayw2w45qg4tesjgyu.afribase.dev/storage/v1/object/public/farm-covers/cassava-illustrative.webp",
+        alt="Cassava plants growing in a field in Nigeria", credit="Ghabzman",
+        source_url="https://commons.wikimedia.org/wiki/File:Cassava_plantation_farm.jpg",
+        license="CC BY 4.0", changes="Resized and converted to WebP", illustrative=True,
+    ))
+    await session.commit()
+    overview = (await client.get("/sponsorships/farms/overview")).json()
+    covers = (await client.get("/media/covers")).json()
+    expected = "/assets/farm-covers/cassava-illustrative.webp"
+    assert overview[0]["cover_image_url"] == expected
+    assert next(item for item in covers if item["crop"] == "cassava")["url"] == expected
 
 # -- plots and the website chat ----------------------------------------------
 async def test_plots_price_the_sponsorship_and_are_taken_once_paid(client, world, session):
