@@ -36,6 +36,11 @@ os.environ.update(
         "PUBLIC_BASE_URL": "http://testserver",
         "AFRIBASE_URL": "",
         "AFRIBASE_ANON_KEY": "",
+        "CENCORI_API_KEY": "xxx",
+        "CENCORI_BASE_URL": "https://api.cencori.com",
+        "CENCORI_VISION_MODEL": "gpt-4o-mini",
+        "CENCORI_VISION_MODE": "live",
+        "CENCORI_VISION_TIMEOUT_SECONDS": "25",
     }
 )
 
@@ -75,6 +80,11 @@ async def _clean_state(monkeypatch, tmp_path):
     BaseAgent.reset_clients()
     # Farm photos go to a throwaway folder, never into the repository.
     monkeypatch.setattr(evidence_store, "_ROOT", str(tmp_path / "generated"))
+    from app.services import private_evidence
+    from app.services.cencori_vision import vision_client
+
+    monkeypatch.setattr(private_evidence, "_ROOT", str(tmp_path / "private-evidence"))
+    vision_client.transport = None
     yield
     BaseAgent.reset_clients()
 

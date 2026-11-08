@@ -18,3 +18,4 @@ env/
 *.log
 # Farm photos stored at runtime
 generated/evidence/
+private-evidence/

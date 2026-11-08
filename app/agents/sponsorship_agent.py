@@ -358,6 +358,8 @@ class SponsorshipAgent(BaseAgent):
         # Record the verdict for the whole group before any money moves.
         await session.commit()
         if decision == "release":
+            # PAYMENT RISK: this legacy branch can charge PayPal. The Cencori photo-check
+            # queue never calls it. A confident model result here is not a human approval.
             for milestone, sponsorship in group:
                 releases.append(
                     await self._release(session, sponsorship, milestone, farm, verdict.observations)

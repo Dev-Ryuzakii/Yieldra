@@ -10,6 +10,7 @@ from app.models.investment import Investment, InvestmentStatus
 from app.models.media import CropImage
 from app.models.offtake import ContractStatus, OfftakeContract
 from app.models.payout import DisbursementStatus, FarmerDisbursement, PayoutAccount
+from app.models.photo_check import PhotoCheck, PhotoCheckReview
 from app.models.reference import ColdStorageFacility, CropParameter
 from app.models.sponsorship import (
     MilestoneStatus,
@@ -46,4 +47,6 @@ __all__ = [
     "PayoutAccount",
     "FarmerDisbursement",
     "DisbursementStatus",
+    "PhotoCheck",
+    "PhotoCheckReview",
 ]

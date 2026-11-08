@@ -26,11 +26,34 @@ export async function api<T>(path: string, options: { method?: string; body?: un
   }
   return data as T;
 }
+export async function apiForm<T>(path: string, body: FormData, adminKey?: string): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (adminKey) headers['X-Admin-Key'] = adminKey;
+  const response = await fetch(path, { method: 'POST', headers, body });
+  const text = await response.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON error page */ }
+  if (!response.ok) {
+    let detail = data?.detail;
+    if (Array.isArray(detail)) detail = detail.map((item: { msg: string }) => item.msg).join('. ');
+    throw new ApiError(response.status, detail);
+  }
+  return data as T;
+}
+export async function apiBlob(path: string, adminKey?: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (adminKey) headers['X-Admin-Key'] = adminKey;
+  const response = await fetch(path, { headers });
+  if (!response.ok) throw new ApiError(response.status, 'The photo could not be loaded.');
+  return response.blob();
+}
 export type Rail = 'paypal';
 export type Currency = 'USD' | 'NGN';
 export interface Meta {
   paypal: string; farmer_payouts: string; model_ready: boolean; auth_ready: boolean; operator_key_required: boolean;
-  usd_ngn_rate: number; telegram_url: string | null; limits: Record<Rail, { currency: Currency; min: number; max: number }>;
+  usd_ngn_rate: number; telegram_url: string | null;   limits: Record<Rail, { currency: Currency; min: number; max: number }>;
+  photo_check?: { provider: string; mode: 'live' | 'mock' | 'blocked'; model: string; route: string; human_review_required: boolean; authorizes_payment: boolean };
+  legacy_photo_can_auto_charge?: boolean;
 }
 export interface AccountSession { authenticated: boolean; profile?: { name: string; email: string; role: string } }
 export const STATE_TEXT: Record<string, string> = {
