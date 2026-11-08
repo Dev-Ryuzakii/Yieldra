@@ -8,13 +8,13 @@ import json
 import secrets
 import time
 import uuid
-from typing import Annotated
-from urllib.parse import urlparse
+from typing import Annotated, Literal
+from urllib.parse import quote, urlparse
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +39,12 @@ class Credentials(BaseModel):
 
 
 class Registration(Credentials):
+    """Self-serve signup. Operator is never accepted from the client."""
+
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=2, max_length=120)
+    account: Literal["farmer", "sponsor"] = "sponsor"
 
 
 def _cipher() -> Fernet:
@@ -125,9 +130,10 @@ async def _profile(identity: dict, db: AsyncSession) -> dict:
         if existing:
             existing.afribase_uid = uid
         else:
-            existing = User(name=(identity.get("user_metadata") or {}).get("name") or email.split("@")[0],
+            metadata = identity.get("user_metadata") or {}
+            existing = User(name=metadata.get("name") or email.split("@")[0],
                             phone=f"{WEB_PREFIX}{uuid.uuid4().hex[:16]}", email=email,
-                            afribase_uid=uid, role=UserRole.sponsor)
+                            afribase_uid=uid, role=_self_serve_role(metadata))
             db.add(existing)
         await db.flush()
     elif existing.email and existing.email.lower() != email:
@@ -137,12 +143,27 @@ async def _profile(identity: dict, db: AsyncSession) -> dict:
             "role": "operator" if email in operators else existing.role.value}
 
 
+def _self_serve_role(metadata: dict) -> UserRole:
+    """A new web account may be a farmer or a sponsor. Nothing else is accepted."""
+    if str(metadata.get("yieldra_role") or "").strip().lower() == UserRole.farmer.value:
+        return UserRole.farmer
+    return UserRole.sponsor
+
+
 @router.post("/register")
 async def register(payload: Registration, request: Request, response: Response,
                    db: AsyncSession = Depends(get_session)) -> dict:
     _same_origin(request)
-    data = await _call("POST", "signup", body={"email": str(payload.email).lower(), "password": payload.password,
-                                               "data": {"name": payload.name.strip()}})
+    redirect_to = quote(f"{settings.public_base_url.rstrip('/')}/signin", safe="")
+    data = await _call(
+        "POST",
+        f"signup?redirect_to={redirect_to}",
+        body={
+            "email": str(payload.email).lower(),
+            "password": payload.password,
+            "data": {"name": payload.name.strip(), "yieldra_role": payload.account},
+        },
+    )
     if data.get("access_token"):
         user = await _call("GET", "user", token=data["access_token"])
         if user.get("email_confirmed_at") or user.get("confirmed_at"):

@@ -19,7 +19,30 @@ Do not promise farmers that a bank transfer has completed based on a PayPal capt
 4. Run `alembic upgrade head`, then `cd app/web && npm run build`.
 5. Start the app with `uvicorn app.main:app --reload --port 8000`. Open `http://127.0.0.1:8000/`.
 
-The operator account is selected by a verified email in `OPERATOR_EMAILS`. Other users can register through Afribase Auth and view their role dashboard. Set `AFRIBASE_URL` to the project root URL and `AFRIBASE_ANON_KEY` to the public anon key. Keep `AFRIBASE_SERVICE_ROLE_KEY` server-side for the publishing script only.
+The sign-in page reads `GET /yieldra/meta`. Afribase reserves `/meta` for its own database API, so that path does not tell the page whether Yieldra auth is configured.
+
+Set these on the API process. The browser does not receive the key. Docker Compose passes them through `env_file: .env` and does not override them. It does override `DATABASE_URL` to the Compose Postgres service, so an Afribase database URL in `.env` is not used by `docker compose up` unless you remove that override.
+
+```env
+AFRIBASE_URL=https://your-project.afribase.dev
+AFRIBASE_ANON_KEY=your-public-anon-key
+PUBLIC_BASE_URL=https://your-yieldra-host
+SECRET_KEY=a-long-unique-secret
+OPERATOR_EMAILS=operator@example.com
+```
+
+`AFRIBASE_SERVICE_ROLE_KEY` stays server-side for `scripts/publish_farm_covers.py` only. It is not used for sign-in.
+
+In the Afribase project, allow `{PUBLIC_BASE_URL}/signin` as an auth redirect. Signup asks Afribase to send the confirmation link there. This checkout cannot see whether the live host has these variables set.
+
+## Farmer signup
+
+1. Open `/signin`.
+2. Choose **Create account**.
+3. Choose **I farm**. **I sponsor** creates a sponsor instead.
+4. Enter your name, email and a password of at least 8 characters, then **Create account**.
+5. If Afribase requires confirmation, open the email link and return to `/signin`. Then choose **Sign in**.
+6. The dashboard role is `farmer`. A farm is listed only when a farm row already uses that user. This form does not create a farm and cannot grant operator, investor, buyer or logistics access. Operator access is still only the `OPERATOR_EMAILS` allowlist, checked on the server.
 
 The six licensed demo farm covers are also kept in `app/web/public/assets/farm-covers/`. The app serves these copies for seeded farms, so cards remain visible if Afribase Storage has an outage. To repair the public Storage objects, set `AFRIBASE_SERVICE_ROLE_KEY` locally and run `.venv/bin/python scripts/publish_farm_covers.py`; it upserts each copy and verifies the public download.
 

@@ -79,7 +79,7 @@ export function Strip({ stages }: { stages: StripStage[] }) {
 }
 export function useMeta() {
   const [meta, setMeta] = useState<Meta | null>(null);
-  useEffect(() => { api<Meta>('/meta').then(setMeta).catch(() => {}); }, []);
+  useEffect(() => { api<Meta>('/yieldra/meta').then(setMeta).catch(() => {}); }, []);
   return meta;
 }
 export function ModeNotice({ meta }: { meta: Meta | null }) {

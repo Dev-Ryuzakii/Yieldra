@@ -30,6 +30,8 @@ services:
     build: .
     env_file: .env
     environment:
+      # Overrides only the database and Redis URLs. AFRIBASE_URL and
+      # AFRIBASE_ANON_KEY still come from env_file.
       DATABASE_URL: postgresql+asyncpg://yieldra:password@db:5432/yieldra_db
       REDIS_URL: redis://redis:6379/0
     ports:
