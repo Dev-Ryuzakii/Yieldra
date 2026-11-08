@@ -25,7 +25,7 @@ The six licensed demo farm covers are also kept in `app/web/public/assets/farm-c
 
 ## OpenAI
 
-The AI agents use OpenAI Chat Completions. Set these values on the app deployment:
+The chat and legacy milestone agents use OpenAI Chat Completions. Set these values on the app deployment:
 
 ```env
 LLM_PROVIDER=openai
@@ -34,6 +34,36 @@ OPENAI_API_KEY=your-key
 ```
 
 The default models are `gpt-5.4-mini` for general agents and `gpt-5.4` for photo diagnosis and milestone verification. Set `MODEL_*` variables to override individual agents. Run `python scripts/check_llm.py` to verify the key and model access. Until a working key is configured, evidence verification stays unavailable. The application server needs these variables; Afribase Auth and Storage alone do not run the AI agents.
+
+## Cencori photo checks
+
+Farmers submit a milestone photo from the dashboard. Operators review it in the console. The server calls Cencori's vision API and stores the result for a person. The model recommendation does not charge PayPal and does not pay the farmer.
+
+Official references used for this integration:
+
+- Vision API: https://cencori.com/docs/api/vision
+- Integration contract: https://cencori.com/llm.txt
+- Vision changelog: https://cencori.com/changelog/vision
+
+The route is `POST https://api.cencori.com/v1/vision` with the server-side header `CENCORI_API_KEY`. The body sends `image_base64`, `mime_type`, `prompt`, `model`, and `response_format=json`. Cencori's contract says the embedded Python SDK is not published, so this app uses that HTTP route directly and does not send photos through an OpenAI-compatible chat client. The documented default vision model is `gpt-4o-mini`. The vision docs also list `gpt-4o`, `gpt-4-turbo`, `claude-sonnet-4-5`, `claude-3-5-sonnet-latest`, `claude-3-5-haiku-latest`, `gemini-2.5-pro`, `gemini-2.5-flash`, and `gemini-2.5-flash-lite`. Set `CENCORI_VISION_MODEL` only to a vision-capable model the Cencori project can route.
+
+```env
+CENCORI_API_KEY=your-project-key
+CENCORI_BASE_URL=https://api.cencori.com
+CENCORI_VISION_MODEL=gpt-4o-mini
+CENCORI_VISION_MODE=live
+CENCORI_VISION_TIMEOUT_SECONDS=25
+```
+
+`CENCORI_VISION_MODE=mock` skips the network call and stores a labeled demo result. It is not a crop judgment. With `CENCORI_VISION_MODE=live` and no key, the check is marked blocked and stays in human review. A missing key is not reported as a successful analysis.
+
+The check compares the photo with the crop and the evidence text stored on that sponsorship milestone. It does not use a universal checklist. A photo cannot prove ownership, location, date, acreage, or that the whole milestone is complete. Any confidence number is labeled as model-reported, not as calibrated accuracy. Text in the photo is stored as untrusted data.
+
+Operator approve, reject, and request-another-photo actions require a written rationale and do not change PayPal execution.
+
+### Payment risk that remains
+
+Telegram photos captioned `PROOF`, and the legacy "Check photo" form in the console, still use the older milestone agent. A confident result on that path can collect the next PayPal tranche. The new Cencori queue does not. Do not treat the two as the same control.
 
 ## Deployment
 

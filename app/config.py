@@ -96,8 +96,19 @@ class Settings(BaseSettings):
     #   >= release  -> the tranche is charged automatically
     #   >= review   -> held for a human reviewer
     #   below       -> rejected; the farmer is asked for a clearer photo
+    # This legacy path can still collect a PayPal tranche. The Cencori photo-check
+    # queue does not use these thresholds and never authorizes a charge.
     milestone_release_confidence: float = 0.75
     milestone_review_confidence: float = 0.50
+
+    # Cencori vision. The key stays on the server. Official route: POST /v1/vision.
+    # gpt-4o-mini is the documented default vision model. CENCORI_VISION_MODE=mock
+    # returns a labeled demo result and does not call the provider.
+    cencori_api_key: str = ""
+    cencori_base_url: str = "https://api.cencori.com"
+    cencori_vision_model: str = "gpt-4o-mini"
+    cencori_vision_mode: str = "live"
+    cencori_vision_timeout_seconds: float = 25.0
 
     # Model assignment per agent. Blank means "use the provider default" above.
     model_investment: str = ""
@@ -121,6 +132,13 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _fill_model_defaults(self) -> "Settings":
         self.llm_provider = (self.llm_provider or "openai").strip().lower()
+        self.cencori_base_url = (self.cencori_base_url or "https://api.cencori.com").strip().rstrip("/")
+        self.cencori_vision_model = (self.cencori_vision_model or "gpt-4o-mini").strip()
+        self.cencori_vision_mode = (self.cencori_vision_mode or "live").strip().lower()
+        if self.cencori_vision_mode not in {"live", "mock"}:
+            raise ValueError("CENCORI_VISION_MODE must be live or mock")
+        if not 5 <= float(self.cencori_vision_timeout_seconds) <= 60:
+            raise ValueError("CENCORI_VISION_TIMEOUT_SECONDS must be between 5 and 60")
         if self.llm_provider not in _DEFAULT_MODELS:
             raise ValueError(
                 f"LLM_PROVIDER must be one of {sorted(_DEFAULT_MODELS)}, got {self.llm_provider!r}"
@@ -159,6 +177,20 @@ class Settings(BaseSettings):
     def llm_live(self) -> bool:
         """True once a real LLM key is configured (not a placeholder)."""
         return not self._is_placeholder(self.resolved_llm_api_key)
+
+    @property
+    def cencori_configured(self) -> bool:
+        """True when a non-placeholder Cencori project key is present."""
+        return not self._is_placeholder(self.cencori_api_key)
+
+    @property
+    def photo_check_mode(self) -> str:
+        """live, mock, or blocked. Blocked means a live call was requested and no key is set."""
+        if self.cencori_vision_mode == "mock":
+            return "mock"
+        if not self.cencori_configured:
+            return "blocked"
+        return "live"
 
     # -- Payments / channels -------------------------------------------------
     @property

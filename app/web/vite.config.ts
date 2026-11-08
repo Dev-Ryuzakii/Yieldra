@@ -14,6 +14,8 @@ export default defineConfig({
       '/media': 'http://localhost:8000',
       '/sponsorships': 'http://localhost:8000',
       '/console/ledger': 'http://localhost:8000',
+      '/console/photo-checks': 'http://localhost:8000',
+      '/photo-checks': 'http://localhost:8000',
       '/disbursements': 'http://localhost:8000',
       '/farmers': 'http://localhost:8000',
       '/farms': 'http://localhost:8000',

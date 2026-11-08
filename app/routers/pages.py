@@ -119,6 +119,16 @@ async def meta() -> dict:
             settings.is_development and settings._is_placeholder(settings.secret_key)
         ),
         "usd_ngn_rate": settings.usd_ngn_rate,
+        "photo_check": {
+            "provider": "cencori",
+            "mode": settings.photo_check_mode,
+            "model": settings.cencori_vision_model,
+            "route": "POST /v1/vision",
+            "human_review_required": True,
+            "authorizes_payment": False,
+        },
+        # The legacy PROOF / evidence route can still collect a PayPal tranche.
+        "legacy_photo_can_auto_charge": True,
         "limits": {
             "paypal": {"currency": "USD", "min": usd_low / 100, "max": usd_high / 100},
         },
