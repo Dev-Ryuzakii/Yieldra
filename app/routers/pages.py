@@ -98,9 +98,7 @@ def _mode(live: bool, real: str) -> str:
     return real if live else "mock"
 
 
-@router.get("/meta")
-async def meta() -> dict:
-    """What this deployment is connected to, for the pages to label themselves honestly."""
+def deployment_meta() -> dict:
     usd_low, usd_high = limits_for("USD")
     return {
         "name": "Yieldra",
@@ -133,3 +131,15 @@ async def meta() -> dict:
             "paypal": {"currency": "USD", "min": usd_low / 100, "max": usd_high / 100},
         },
     }
+
+
+@router.get("/yieldra/meta")
+async def yieldra_meta() -> dict:
+    """Public app configuration. Afribase reserves ``/meta`` for its own database API."""
+    return deployment_meta()
+
+
+@router.get("/meta")
+async def meta() -> dict:
+    """Same payload for local calls. Do not use this path on an Afribase hostname."""
+    return deployment_meta()
