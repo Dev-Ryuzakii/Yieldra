@@ -32,7 +32,7 @@ def fake_afribase(monkeypatch, live_setting):
             return {"access_token": email, "refresh_token": email, "expires_in": 3600}
         if path == "user":
             return users[token]
-        if path == "signup":
+        if path.startswith("signup"):
             return {"id": "new-uid", "email": body["email"]}
         if path == "logout":
             return {}
@@ -131,6 +131,46 @@ async def test_operator_allowlist_is_server_controlled(client, fake_afribase, li
     assert (await client.get("/console/ledger")).status_code == 403
 
 
+async def test_farmer_signup_is_stored_as_farmer_and_cannot_request_operator(client, fake_afribase, monkeypatch):
+    captured: dict = {}
+
+    async def call_with_metadata(method, path, *, body=None, token=None):
+        if path.startswith("signup"):
+            captured["path"] = path
+            captured["data"] = body["data"]
+            return {"access_token": "farmer-token", "refresh_token": "farmer-refresh", "expires_in": 3600}
+        if path == "user":
+            return {"id": "new-farmer", "email": "ada.farm@example.com", "confirmed_at": "2026-01-01T00:00:00Z",
+                    "user_metadata": {"name": "Ada Farm", "yieldra_role": captured["data"]["yieldra_role"]}}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(auth, "_call", call_with_metadata)
+    result = await client.post("/account/register", json={
+        "name": "Ada Farm", "email": "ada.farm@example.com", "password": "long-password", "account": "farmer",
+    })
+    assert result.status_code == 200
+    assert result.json()["profile"]["role"] == "farmer"
+    assert captured["data"] == {"name": "Ada Farm", "yieldra_role": "farmer"}
+    assert "redirect_to=" in captured["path"]
+    refused = await client.post("/account/register", json={
+        "name": "Ada Farm", "email": "ada.farm@example.com", "password": "long-password", "account": "operator",
+    })
+    assert refused.status_code == 422
+    extra = await client.post("/account/register", json={
+        "name": "Ada Farm", "email": "ada.farm@example.com", "password": "long-password", "role": "operator",
+    })
+    assert extra.status_code == 422
+
+
+async def test_existing_farmer_keeps_role_when_metadata_says_sponsor(client, session, world, fake_afribase):
+    world.farmer.email = "farmer@example.com"
+    fake_afribase["farmer@example.com"]["user_metadata"] = {"yieldra_role": "sponsor"}
+    await session.commit()
+    login = await client.post("/account/login", json={"email": "farmer@example.com", "password": "correct-password"})
+    assert login.status_code == 200
+    assert login.json()["profile"]["role"] == "farmer"
+
+
 async def test_registration_needs_confirmation(client, fake_afribase):
     result = await client.post("/account/register", json={"name": "Ada Okafor", "email": "ada@example.com", "password": "long-password"})
     assert result.status_code == 200
@@ -143,8 +183,10 @@ async def test_allowlisted_operator_can_register_and_enter_console(client, fake_
     live_setting(operator_emails="other@example.com", secret_key="test-secret")
 
     async def call(method, path, *, body=None, token=None):
-        if path == "signup":
+        if path.startswith("signup"):
             assert body["email"] == "other@example.com"
+            assert body["data"]["yieldra_role"] == "sponsor"
+            assert "redirect_to=" in path and path.endswith("%2Fsignin")
             return {"access_token": "operator-token", "refresh_token": "operator-refresh",
                     "expires_in": 3600}
         if path == "user":

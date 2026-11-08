@@ -300,14 +300,18 @@ async def test_pages_and_their_assets_are_served(client):
 
 
 async def test_meta_reports_what_the_deployment_is_connected_to(client, live_setting):
-    meta = (await client.get("/meta")).json()
+    meta = (await client.get("/yieldra/meta")).json()
+    assert meta == (await client.get("/meta")).json()
     assert meta["paypal"] == "mock" and meta["model_ready"] is False
+    assert meta["auth_ready"] is False
     assert meta["operator_key_required"] is False
     assert meta["farmer_payouts"] == "pending_manual"
     assert set(meta["limits"]) == {"paypal"}
 
-    live_setting(paypal_client_id="id", paypal_client_secret="s", secret_key="real-secret", llm_api_key="sk-ant-real")
-    meta = (await client.get("/meta")).json()
+    live_setting(paypal_client_id="id", paypal_client_secret="s", secret_key="real-secret", llm_api_key="sk-ant-real",
+                 afribase_url="https://example.afribase.dev", afribase_anon_key="anon")
+    meta = (await client.get("/yieldra/meta")).json()
+    assert meta["auth_ready"] is True
     assert meta["paypal"] == "sandbox" and meta["model_ready"] is True
     assert meta["operator_key_required"] is True
 
