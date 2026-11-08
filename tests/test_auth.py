@@ -2,10 +2,14 @@
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 from app.main import app
 from app.models.sponsorship import Sponsorship
+from app.models.user import User, UserRole
 from app.routers import auth
+
+FARMER_UID = "d85b5168-b6dd-443b-8189-6009ecd1c80a"
 
 
 @pytest.fixture
@@ -248,3 +252,178 @@ async def test_a_chat_linked_to_one_web_account_is_not_taken_by_another(client, 
     taken = await client.post("/webhook/telegram", json={"chat": "7070", "text": second})
 
     assert taken.json()["result"]["status"] == "chat_taken"
+
+
+def _farmer_identity(**metadata):
+    return {
+        "id": FARMER_UID,
+        "email": "role-sync@example.com",
+        "confirmed_at": "2026-01-01T00:00:00Z",
+        "user_metadata": metadata,
+    }
+
+
+async def test_confirmed_farmer_metadata_corrects_a_linked_sponsor_row(
+    client, session, monkeypatch, live_setting
+):
+    live_setting(afribase_url="https://example.afribase.dev", afribase_anon_key="anon")
+    """The reported account: Afribase says farmer, the linked Yieldra row is still sponsor."""
+    session.add(User(
+        name="New Farmer", phone="sync-farmer-uid", email="role-sync@example.com",
+        afribase_uid=FARMER_UID, role=UserRole.sponsor,
+    ))
+    await session.commit()
+    identity = _farmer_identity(name="New Farmer", yieldra_role="farmer")
+
+    async def call(method, path, *, body=None, token=None):
+        if path == "token?grant_type=password":
+            return {"access_token": "farmer-token", "refresh_token": "farmer-refresh", "expires_in": 3600}
+        if path == "user":
+            return identity
+        raise AssertionError(path)
+
+    monkeypatch.setattr(auth, "_call", call)
+    login = await client.post("/account/login", json={
+        "email": "role-sync@example.com", "password": "correct-password",
+    })
+    assert login.json()["profile"]["role"] == "farmer"
+    dashboard = (await client.get("/account/dashboard")).json()
+    assert dashboard["profile"]["role"] == "farmer"
+    assert dashboard["items"] == []
+    session.expire_all()
+    stored = (await session.execute(select(User).where(User.afribase_uid == FARMER_UID))).scalar_one()
+    assert stored.role == UserRole.farmer
+
+
+async def test_stale_session_picks_up_farmer_metadata_without_signing_in_again(
+    client, session, monkeypatch, live_setting
+):
+    live_setting(afribase_url="https://example.afribase.dev", afribase_anon_key="anon")
+    identity = _farmer_identity()
+
+    async def call(method, path, *, body=None, token=None):
+        if path == "token?grant_type=password":
+            return {"access_token": "farmer-token", "refresh_token": "farmer-refresh", "expires_in": 3600}
+        if path == "user":
+            return identity
+        raise AssertionError(path)
+
+    monkeypatch.setattr(auth, "_call", call)
+    first = await client.post("/account/login", json={
+        "email": "role-sync@example.com", "password": "correct-password",
+    })
+    assert first.json()["profile"]["role"] == "sponsor"
+    identity["user_metadata"] = {"yieldra_role": "farmer"}
+    dashboard = (await client.get("/account/dashboard")).json()
+    assert dashboard["profile"]["role"] == "farmer"
+    me = (await client.get("/account/me")).json()
+    assert me["role"] == "farmer"
+
+
+async def test_sponsor_who_owns_a_sponsorship_is_not_rewritten(
+    client, session, world, monkeypatch, live_setting
+):
+    live_setting(afribase_url="https://example.afribase.dev", afribase_anon_key="anon")
+    world.sponsor.email = "sponsor@example.com"
+    world.sponsor.afribase_uid = "sponsor-uid"
+    session.add(Sponsorship(
+        reference="KEEP-OWNER", farm_id=world.farm.id, sponsor_id=world.sponsor.id, total_minor=10000,
+    ))
+    await session.commit()
+    owner_id = world.sponsor.id
+
+    async def call(method, path, *, body=None, token=None):
+        if path == "token?grant_type=password":
+            return {"access_token": "sponsor-token", "refresh_token": "sponsor-refresh", "expires_in": 3600}
+        if path == "user":
+            return {"id": "sponsor-uid", "email": "sponsor@example.com", "confirmed_at": "2026-01-01T00:00:00Z",
+                    "user_metadata": {"yieldra_role": "farmer"}}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(auth, "_call", call)
+    login = await client.post("/account/login", json={
+        "email": "sponsor@example.com", "password": "correct-password",
+    })
+    assert login.json()["profile"]["role"] == "sponsor"
+    session.expire_all()
+    stored = await session.get(User, owner_id)
+    sponsorship = (await session.execute(
+        select(Sponsorship).where(Sponsorship.reference == "KEEP-OWNER")
+    )).scalar_one()
+    assert stored.role == UserRole.sponsor
+    assert sponsorship.sponsor_id == owner_id
+
+
+async def test_metadata_cannot_grant_or_rewrite_operator(client, session, live_setting, monkeypatch):
+    live_setting(operator_emails="role-sync@example.com", secret_key="test-secret",
+                 afribase_url="https://example.afribase.dev", afribase_anon_key="anon")
+    session.add(User(
+        name="Operator", phone="sync-operator", email="role-sync@example.com",
+        afribase_uid=FARMER_UID, role=UserRole.sponsor,
+    ))
+    await session.commit()
+
+    async def call(method, path, *, body=None, token=None):
+        if path == "token?grant_type=password":
+            return {"access_token": "op-token", "refresh_token": "op-refresh", "expires_in": 3600}
+        if path == "user":
+            return _farmer_identity(yieldra_role="operator")
+        raise AssertionError(path)
+
+    monkeypatch.setattr(auth, "_call", call)
+    login = await client.post("/account/login", json={
+        "email": "role-sync@example.com", "password": "correct-password",
+    })
+    assert login.json()["profile"]["role"] == "operator"
+    session.expire_all()
+    stored = (await session.execute(select(User).where(User.afribase_uid == FARMER_UID))).scalar_one()
+    assert stored.role == UserRole.sponsor
+
+
+async def test_assigned_investor_is_not_changed_by_farmer_metadata(
+    client, session, world, monkeypatch, live_setting
+):
+    live_setting(afribase_url="https://example.afribase.dev", afribase_anon_key="anon")
+    world.sponsor.email = "investor@example.com"
+    world.sponsor.role = UserRole.investor
+    world.sponsor.afribase_uid = "investor-uid"
+    await session.commit()
+
+    async def call(method, path, *, body=None, token=None):
+        if path == "token?grant_type=password":
+            return {"access_token": "inv-token", "refresh_token": "inv-refresh", "expires_in": 3600}
+        if path == "user":
+            return {"id": "investor-uid", "email": "investor@example.com", "confirmed_at": "2026-01-01T00:00:00Z",
+                    "user_metadata": {"yieldra_role": "farmer"}}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(auth, "_call", call)
+    login = await client.post("/account/login", json={
+        "email": "investor@example.com", "password": "correct-password",
+    })
+    assert login.json()["profile"]["role"] == "investor"
+
+
+async def test_signup_uses_role_from_the_signup_user_when_the_follow_up_read_omits_it(
+    client, session, monkeypatch, live_setting
+):
+    live_setting(afribase_url="https://example.afribase.dev", afribase_anon_key="anon")
+    async def call(method, path, *, body=None, token=None):
+        if path.startswith("signup"):
+            return {
+                "access_token": "new-token", "refresh_token": "new-refresh", "expires_in": 3600,
+                "user": {"id": FARMER_UID, "email": "role-sync@example.com",
+                         "user_metadata": {"name": "Ada Farm", "yieldra_role": body["data"]["yieldra_role"]}},
+            }
+        if path == "user":
+            return {"id": FARMER_UID, "email": "role-sync@example.com", "confirmed_at": "2026-01-01T00:00:00Z"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(auth, "_call", call)
+    result = await client.post("/account/register", json={
+        "name": "Ada Farm", "email": "role-sync@example.com", "password": "long-password", "account": "farmer",
+    })
+    assert result.json()["profile"]["role"] == "farmer"
+    session.expire_all()
+    stored = (await session.execute(select(User).where(User.afribase_uid == FARMER_UID))).scalar_one()
+    assert stored.role == UserRole.farmer
