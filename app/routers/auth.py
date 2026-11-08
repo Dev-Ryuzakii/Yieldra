@@ -15,7 +15,7 @@ import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -130,7 +130,7 @@ async def _profile(identity: dict, db: AsyncSession) -> dict:
         if existing:
             existing.afribase_uid = uid
         else:
-            metadata = identity.get("user_metadata") or {}
+            metadata = _metadata(identity)
             existing = User(name=metadata.get("name") or email.split("@")[0],
                             phone=f"{WEB_PREFIX}{uuid.uuid4().hex[:16]}", email=email,
                             afribase_uid=uid, role=_self_serve_role(metadata))
@@ -138,9 +138,43 @@ async def _profile(identity: dict, db: AsyncSession) -> dict:
         await db.flush()
     elif existing.email and existing.email.lower() != email:
         raise HTTPException(409, "Account email changed. Contact an operator to relink it")
+    await _adopt_claimed_farmer_role(existing, identity, db)
     operators = {item.strip().lower() for item in settings.operator_emails.split(",") if item.strip()}
     return {"id": existing.id, "name": existing.name, "email": email,
             "role": "operator" if email in operators else existing.role.value}
+
+
+def _prefer_signup_metadata(user: dict, signup: dict) -> dict:
+    """Keep the role from the signup response when the follow-up user read omits it."""
+    if not isinstance(user, dict):
+        return user
+    if _claims_farmer(user):
+        return user
+    extra = _metadata(signup if isinstance(signup, dict) else {})
+    if str(extra.get("yieldra_role") or "").strip().lower() != UserRole.farmer.value:
+        return user
+    metadata = _metadata(user)
+    metadata["yieldra_role"] = UserRole.farmer.value
+    if extra.get("name") and not metadata.get("name"):
+        metadata["name"] = extra["name"]
+    return {**user, "user_metadata": metadata}
+
+
+def _metadata(identity: dict) -> dict:
+    """Signup fields from the shapes Afribase and GoTrue actually return."""
+    merged: dict = {}
+    sources = [identity.get("raw_user_meta_data"), identity.get("user_metadata")]
+    wrapped = identity.get("user")
+    if isinstance(wrapped, dict):
+        sources.extend((wrapped.get("raw_user_meta_data"), wrapped.get("user_metadata")))
+    for source in sources:
+        if isinstance(source, dict):
+            merged.update(source)
+    return merged
+
+
+def _claims_farmer(identity: dict) -> bool:
+    return str(_metadata(identity).get("yieldra_role") or "").strip().lower() == UserRole.farmer.value
 
 
 def _self_serve_role(metadata: dict) -> UserRole:
@@ -148,6 +182,26 @@ def _self_serve_role(metadata: dict) -> UserRole:
     if str(metadata.get("yieldra_role") or "").strip().lower() == UserRole.farmer.value:
         return UserRole.farmer
     return UserRole.sponsor
+
+
+async def _adopt_claimed_farmer_role(user: User, identity: dict, db: AsyncSession) -> None:
+    """Correct a self-serve sponsor row when Afribase says this signup chose farmer.
+
+    A sponsor who already owns a sponsorship stays a sponsor, so ownership does not
+    move. Operator, investor, buyer and logistics rows are not rewritten from metadata.
+    """
+    if user.role != UserRole.sponsor or not _claims_farmer(identity):
+        return
+    email = str(identity.get("email") or "").strip().lower()
+    operators = {item.strip().lower() for item in settings.operator_emails.split(",") if item.strip()}
+    if email in operators:
+        return
+    owned = await db.scalar(
+        select(func.count(Sponsorship.id)).where(Sponsorship.sponsor_id == user.id)
+    )
+    if owned:
+        return
+    user.role = UserRole.farmer
 
 
 @router.post("/register")
@@ -166,6 +220,7 @@ async def register(payload: Registration, request: Request, response: Response,
     )
     if data.get("access_token"):
         user = await _call("GET", "user", token=data["access_token"])
+        user = _prefer_signup_metadata(user, data)
         if user.get("email_confirmed_at") or user.get("confirmed_at"):
             cookie = {key: data[key] for key in ("access_token", "refresh_token") if key in data} | {
                 "expires_at": int(time.time()) + int(data.get("expires_in", 3600))}

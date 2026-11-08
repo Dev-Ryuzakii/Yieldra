@@ -44,6 +44,8 @@ In the Afribase project, allow `{PUBLIC_BASE_URL}/signin` as an auth redirect. S
 5. If Afribase requires confirmation, open the email link and return to `/signin`. Then choose **Sign in**.
 6. The dashboard role is `farmer`. A farm is listed only when a farm row already uses that user. This form does not create a farm and cannot grant operator, investor, buyer or logistics access. Operator access is still only the `OPERATOR_EMAILS` allowlist, checked on the server.
 
+On each signed-in request the server reads `user_metadata.yieldra_role`. If it is `farmer` and the linked row is still a sponsor with no sponsorships, the row becomes `farmer`. A sponsor who already owns a sponsorship stays a sponsor. Operator, investor, buyer and logistics roles are not taken from that metadata. The dashboard asks `/account/dashboard` for the role; it is not stored in the browser session.
+
 The six licensed demo farm covers are also kept in `app/web/public/assets/farm-covers/`. The app serves these copies for seeded farms, so cards remain visible if Afribase Storage has an outage. To repair the public Storage objects, set `AFRIBASE_SERVICE_ROLE_KEY` locally and run `.venv/bin/python scripts/publish_farm_covers.py`; it upserts each copy and verifies the public download.
 
 ## OpenAI
