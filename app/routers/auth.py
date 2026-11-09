@@ -295,9 +295,14 @@ async def dashboard(identity: Annotated[dict, Depends(current_identity)],
                   "status": s.status.value, "amount": s.total_minor / 100, "currency": s.currency,
                   "href": f"/s/{s.reference}"} for s, f in (await db.execute(stmt.limit(30))).all()]
     elif role == "farmer":
-        farms = (await db.execute(select(Farm).where(Farm.farmer_id == uid).order_by(Farm.id.desc()))).scalars()
-        items = [{"id": f.id, "title": f.name, "subtitle": f"{f.crop_type} · {f.location}",
-                  "status": f.status.value} for f in farms]
+        from app.services.farm_assignment import photo_readiness
+
+        farms = (await db.execute(select(Farm).where(Farm.farmer_id == uid).order_by(Farm.id.desc()))).scalars().all()
+        for f in farms:
+            photo = await photo_readiness(db, f.id)
+            items.append({"id": f.id, "title": f.name, "subtitle": f"{f.crop_type} · {f.location}",
+                          "status": f.status.value, "note": photo["note"],
+                          "photo_ready": photo["open_stage"] is not None})
     elif role == "investor":
         rows = (await db.execute(select(Investment, Farm).join(Farm).where(Investment.investor_id == uid))).all()
         items = [{"id": i.id, "title": f.name, "subtitle": f.crop_type, "status": i.status.value,

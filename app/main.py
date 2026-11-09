@@ -16,6 +16,7 @@ from app.routers import (
     console,
     auth,
     chat,
+    farm_assignments,
     farms,
     health,
     investments,
@@ -102,6 +103,7 @@ app.include_router(sponsorships.router)
 app.include_router(payouts.router)
 app.include_router(photo_checks.router)
 app.include_router(console.router)
+app.include_router(farm_assignments.router)
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(pages.router)

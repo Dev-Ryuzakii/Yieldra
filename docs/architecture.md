@@ -27,3 +27,27 @@ Website milestone photos use a separate server-side client, `app/services/cencor
 ## Safety of state changes
 
 PayPal events are verified with PayPal. Captured amounts are checked against milestone amounts before marking a stage paid. Later PayPal charges use stable idempotency references. The capture is committed before model-generated messages or notifications run. Payout obligations are recorded separately from sponsor payment status.
+
+## Farm assignment
+
+`Farm.farmer_id` is the only link between a farm and its farmer. Operators change it
+from the **Farm assignments** panel on `/dashboard` (also on `/console`), backed by:
+
+- `GET /console/farm-assignments`: operator only. Farms with their current owner,
+  photo readiness and any reassignment blockers, plus the farmers that may be chosen
+  (role `farmer`, signed in to Yieldra at least once, not an operator email). Emails
+  are masked.
+- `POST /console/farms/{farm_id}/assignment` with `farmer_id`, `expected_farmer_id`
+  (the owner the operator saw), `reason` (10 to 500 characters) and `confirm: true`.
+  Same-origin only. Repeating the current assignment returns `unchanged` and writes
+  nothing. The write is a compare-and-set on `farmer_id`, so a stale or concurrent
+  change returns 409 instead of overwriting.
+
+A change is refused while the farm has a photo check pending or awaiting review, or a
+tranche under review or awaiting payment. Each change writes a
+`farm_assignment_events` row with the farm, previous and new farmer, operator, time and
+reason. Sponsorships, PayPal records, farmer payout rows and photo evidence keep their
+original owners.
+
+Deploy the table with `alembic upgrade head` (revision `e2a7c4f19b38`). Preview the SQL
+first with `alembic upgrade c4e8b1a07d21:e2a7c4f19b38 --sql`.
