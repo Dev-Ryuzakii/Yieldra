@@ -1,6 +1,7 @@
 """ORM models. Importing this package registers every table on ``Base.metadata``."""
 
 from app.models.farm import Farm, FarmPlot, FarmStatus, PlotStatus
+from app.models.farm_assignment import FarmAssignmentEvent
 from app.models.harvest import (
     ColdStorageBooking,
     Harvest,
@@ -29,6 +30,7 @@ __all__ = [
     "FarmPlot",
     "FarmStatus",
     "PlotStatus",
+    "FarmAssignmentEvent",
     "Harvest",
     "HarvestStatus",
     "ColdStorageBooking",
